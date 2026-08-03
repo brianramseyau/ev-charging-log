@@ -1,5 +1,5 @@
 # ---- build ----
-FROM node:22-alpine AS build
+FROM node:24-alpine AS build
 # better-sqlite3 has no prebuilt binary for every platform (e.g. arm64 musl), so it
 # falls back to compiling from source here.
 RUN apk add --no-cache python3 make g++
@@ -16,7 +16,7 @@ ENV DATABASE_URL=/tmp/build-time.db
 RUN npm run build
 
 # ---- production dependencies (separate from build, so devDependencies never ship) ----
-FROM node:22-alpine AS prod-deps
+FROM node:24-alpine AS prod-deps
 RUN apk add --no-cache python3 make g++
 WORKDIR /app
 COPY package.json package-lock.json ./
@@ -25,7 +25,7 @@ COPY package.json package-lock.json ./
 RUN npm ci --omit=dev --ignore-scripts && npm rebuild better-sqlite3
 
 # ---- runtime ----
-FROM node:22-alpine
+FROM node:24-alpine
 RUN apk add --no-cache su-exec
 WORKDIR /app
 ENV NODE_ENV=production
