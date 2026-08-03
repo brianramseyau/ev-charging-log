@@ -6,7 +6,9 @@
 <div class="error-page">
 	<img src={crashedEv} alt="A cartoon illustration of a crashed EV, dazed with X eyes and smoke" />
 	<h1>Oh no, it crashed!</h1>
-	<p class="error-page__status">{page.status}{page.error?.message ? ` — ${page.error.message}` : ''}</p>
+	<p class="error-page__status">
+		{page.status}{page.error?.message ? ` — ${page.error.message}` : ''}
+	</p>
 	<a class="error-page__home" href="/">Back to safety</a>
 </div>
 

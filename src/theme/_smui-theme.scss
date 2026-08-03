@@ -4,22 +4,22 @@
 
 // EV Charging Log theme — teal/blue matches the app logo, amber echoes the charging bolt.
 @use '@smui/common/theme/index' as theme with (
-  $primary: #0f766e,
-  $secondary: #0369a1,
-  $surface: #fff,
-  $background: #f8fafc,
-  $error: color-palette.$red-900
+	$primary: #0f766e,
+	$secondary: #0369a1,
+	$surface: #fff,
+	$background: #f8fafc,
+	$error: color-palette.$red-900
 );
 
 html,
 body {
-  background-color: theme.$background;
-  color: theme.$on-surface;
+	background-color: theme.$background;
+	color: theme.$on-surface;
 }
 
 a {
-  color: theme.$secondary;
+	color: theme.$secondary;
 }
 a:visited {
-  color: color.scale(theme.$secondary, $lightness: -35%);
+	color: color.scale(theme.$secondary, $lightness: -35%);
 }
