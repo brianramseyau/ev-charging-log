@@ -16,5 +16,4 @@
   <Config Name="Data" Target="/data" Default="/mnt/user/appdata/ev-charging-log" Mode="rw" Description="SQLite database and app data" Type="Path" Display="always" Required="true">/mnt/user/appdata/ev-charging-log</Config>
   <Config Name="PUID" Target="PUID" Default="99" Mode="" Description="User ID to run the app as (default matches Unraid's 'nobody')" Type="Variable" Display="always" Required="true">99</Config>
   <Config Name="PGID" Target="PGID" Default="100" Mode="" Description="Group ID to run the app as (default matches Unraid's 'users')" Type="Variable" Display="always" Required="true">100</Config>
-  <Config Name="TZ" Target="TZ" Default="Etc/UTC" Mode="" Description="Timezone, e.g. Australia/Melbourne" Type="Variable" Display="always" Required="false">Etc/UTC</Config>
 </Container>

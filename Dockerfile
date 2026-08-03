@@ -31,6 +31,7 @@ WORKDIR /app
 ENV NODE_ENV=production
 ENV PORT=3000
 ENV DATABASE_URL=/data/ev-charging-log.db
+ENV TZ=Etc/UTC
 
 COPY --from=prod-deps /app/node_modules ./node_modules
 COPY --from=build /app/build ./build
