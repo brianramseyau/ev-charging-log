@@ -83,6 +83,38 @@ function isOffpeak(time: string, windows: { start: string; end: string }[]): boo
  * (per-minute) splitting is ever needed, the schema would need to capture
  * session duration/end time first.
  */
+export interface HomeSessionForRecalc extends SessionForCost {
+	id: number;
+	cost: number | null;
+}
+
+/**
+ * Recomputes cost for a set of home sessions against the current set of rate
+ * plans. Meant to be called after a rate plan is added, edited, or deleted,
+ * since a session's cost is computed once at save time and otherwise has no
+ * way to pick up a rate change that applies retroactively to its date.
+ *
+ * Returns only the sessions whose cost actually changed (including changing
+ * to/from null, e.g. a session that predated any rate plan now resolves one),
+ * so callers can write just those rows instead of the whole table.
+ */
+export function recalculateSessionCosts<T extends HomeSessionForRecalc>(
+	sessions: T[],
+	plans: RatePlan[]
+): { id: number; cost: number | null }[] {
+	const updates: { id: number; cost: number | null }[] = [];
+
+	for (const session of sessions) {
+		const plan = resolveRatePlan(session.date, plans);
+		const cost = plan ? calculateSessionCost(session, plan) : null;
+		if (cost !== session.cost) {
+			updates.push({ id: session.id, cost });
+		}
+	}
+
+	return updates;
+}
+
 export function calculateSessionCost(session: SessionForCost, plan: RatePlan): number {
 	if (plan.type === 'flat') {
 		if (plan.flatRate == null) {

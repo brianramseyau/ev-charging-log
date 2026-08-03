@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { calculateSessionCost, resolveRatePlan, type RatePlan } from './rates';
+import {
+	calculateSessionCost,
+	recalculateSessionCosts,
+	resolveRatePlan,
+	type RatePlan
+} from './rates';
 
 function flatPlan(overrides: Partial<RatePlan> = {}): RatePlan {
 	return {
@@ -171,6 +176,43 @@ describe('calculateSessionCost - peak/offpeak plans', () => {
 		expect(() =>
 			calculateSessionCost({ date: '2026-06-01', time: '12:00', kwhUsed: 10 }, plan)
 		).toThrow();
+	});
+});
+
+describe('recalculateSessionCosts', () => {
+	it('assigns a cost to a session that previously had none, once a matching plan exists', () => {
+		const plan = flatPlan({ effectiveFrom: '2026-01-01', flatRate: 0.3 });
+		const session = { id: 1, date: '2026-02-01', time: '18:00', kwhUsed: 10, cost: null };
+
+		const updates = recalculateSessionCosts([session], [plan]);
+
+		expect(updates).toEqual([{ id: 1, cost: 3 }]);
+	});
+
+	it('updates cost for sessions whose rate changed retroactively', () => {
+		const plan = flatPlan({ effectiveFrom: '2026-01-01', flatRate: 0.4 });
+		const session = { id: 1, date: '2026-02-01', time: '18:00', kwhUsed: 10, cost: 3 };
+
+		const updates = recalculateSessionCosts([session], [plan]);
+
+		expect(updates).toEqual([{ id: 1, cost: 4 }]);
+	});
+
+	it('clears cost back to null when a session no longer resolves any plan (e.g. plan deleted)', () => {
+		const session = { id: 1, date: '2026-02-01', time: '18:00', kwhUsed: 10, cost: 3 };
+
+		const updates = recalculateSessionCosts([session], []);
+
+		expect(updates).toEqual([{ id: 1, cost: null }]);
+	});
+
+	it('omits sessions whose recomputed cost is unchanged', () => {
+		const plan = flatPlan({ effectiveFrom: '2026-01-01', flatRate: 0.3 });
+		const session = { id: 1, date: '2026-02-01', time: '18:00', kwhUsed: 10, cost: 3 };
+
+		const updates = recalculateSessionCosts([session], [plan]);
+
+		expect(updates).toEqual([]);
 	});
 });
 
