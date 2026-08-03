@@ -18,7 +18,7 @@
 		"db:generate": "drizzle-kit generate",
 		"db:migrate": "drizzle-kit migrate",
 		"db:studio": "drizzle-kit studio",
-		"theme:compile": "smui-theme compile static/smui/smui.css -i src/theme && smui-theme compile static/smui/smui-dark.css -i src/theme/dark",
+		"theme:compile": "mkdir -p static/smui && smui-theme compile static/smui/smui.css -i src/theme && smui-theme compile static/smui/smui-dark.css -i src/theme/dark",
 		"icons:generate": "node scripts/generate-icons.mjs",
 		"assets:generate": "npm run theme:compile && npm run icons:generate"
 	},

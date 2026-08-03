@@ -9,9 +9,7 @@ import {
 	sortByDateTimeDesc,
 	withEfficiency
 } from '$lib/server/sessions';
-// TODO: swap this import for '$lib/server/rates' once that module lands on main
-// (see the note at the top of rates-stub.ts for details).
-import { calculateSessionCost, resolveRatePlan } from '$lib/server/rates-stub';
+import { calculateSessionCost, resolveRatePlan } from '$lib/server/rates';
 
 export const load: PageServerLoad = async () => {
 	const [sessions, periods] = await Promise.all([
@@ -94,10 +92,15 @@ export const actions: Actions = {
 		const billingPeriodId = findBillingPeriodId(date, periods);
 
 		let cost: number | null = null;
+		let noRatePlan = false;
 		if (kind === 'home') {
 			const plans = await db.select().from(ratePlans);
 			const plan = resolveRatePlan(date, plans);
-			cost = calculateSessionCost({ date, time, kwhUsed }, plan);
+			if (plan) {
+				cost = calculateSessionCost({ date, time, kwhUsed }, plan);
+			} else {
+				noRatePlan = true;
+			}
 		}
 
 		await db.insert(chargingSessions).values({
@@ -115,7 +118,8 @@ export const actions: Actions = {
 		return {
 			success: true,
 			odometerWarning,
-			unassigned: billingPeriodId == null
+			unassigned: billingPeriodId == null,
+			noRatePlan
 		};
 	},
 

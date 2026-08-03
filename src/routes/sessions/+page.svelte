@@ -192,6 +192,11 @@
 					{#if form.unassigned}
 						<p class="save-feedback__note">Not yet assigned to a billing period.</p>
 					{/if}
+					{#if form.noRatePlan}
+						<p class="save-feedback__warning">
+							No rate plan covers this date yet — cost was left unset. Add one on the Rates page.
+						</p>
+					{/if}
 				</div>
 			{/if}
 		</form>
