@@ -2,10 +2,20 @@
 // this folder. See PLAN.md §5.5 and the dataviz skill for the conventions these
 // follow (mark specs, tick rounding, compact figure formatting).
 
-/** "Nice" round tick values spanning [min, max] (always includes 0 as the baseline). */
-export function niceTicks(min: number, max: number, targetCount = 4): number[] {
-	const lo = Math.min(0, min);
-	const hi = Math.max(0, max, 0.0001);
+/**
+ * "Nice" round tick values spanning [min, max]. Includes 0 as the baseline by
+ * default (appropriate for magnitude charts like bars); pass `includeZero: false`
+ * for trend charts that should zoom to the data's own range instead.
+ */
+export function niceTicks(
+	min: number,
+	max: number,
+	targetCount = 4,
+	options: { includeZero?: boolean } = {}
+): number[] {
+	const includeZero = options.includeZero ?? true;
+	const lo = includeZero ? Math.min(0, min) : min;
+	const hi = Math.max(includeZero ? 0 : min, max, lo + 0.0001);
 	const rawStep = (hi - lo) / targetCount;
 	const magnitude = 10 ** Math.floor(Math.log10(rawStep || 1));
 	const normalized = rawStep / magnitude;
@@ -14,7 +24,8 @@ export function niceTicks(min: number, max: number, targetCount = 4): number[] {
 
 	const ticks: number[] = [];
 	const start = Math.floor(lo / step) * step;
-	for (let t = start; t <= hi + step * 0.001; t += step) {
+	const end = Math.ceil(hi / step) * step;
+	for (let t = start; t <= end + step * 0.001; t += step) {
 		const rounded = Math.round(t * 1000) / 1000;
 		if (ticks[ticks.length - 1] !== rounded) ticks.push(rounded);
 	}

@@ -15,7 +15,7 @@
 	const values = $derived(points.map((p) => p.kmPerKwh));
 	const yMin = $derived(values.length ? Math.min(...values) : 0);
 	const yMax = $derived(values.length ? Math.max(...values) : 1);
-	const yTicks = $derived(niceTicks(yMin, yMax, 4));
+	const yTicks = $derived(niceTicks(yMin, yMax, 4, { includeZero: false }));
 	const yDomainMin = $derived(yTicks[0] ?? 0);
 	const yDomainMax = $derived(yTicks[yTicks.length - 1] ?? 1);
 
