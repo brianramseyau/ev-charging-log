@@ -230,7 +230,6 @@
 	.summary-value {
 		font-size: 1.05rem;
 		font-weight: 600;
-		color: #0f172a;
 	}
 
 	.export-link {
@@ -270,5 +269,13 @@
 	.empty {
 		color: #64748b;
 		font-size: 0.9rem;
+	}
+
+	@media (prefers-color-scheme: dark) {
+		.range,
+		.summary-label,
+		.empty {
+			color: #94a3b8;
+		}
 	}
 </style>
