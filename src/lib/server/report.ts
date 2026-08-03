@@ -249,7 +249,7 @@ export async function generateReport(
 	sheet.getCell('B4').value = homeKwhTotal;
 	sheet.getCell('B4').numFmt = '#,##0.00';
 	sheet.getCell('E4').value = rate;
-	sheet.getCell('E4').numFmt = '$#,##0.000';
+	sheet.getCell('E4').numFmt = '$#,##0.00000';
 
 	// --- Summary: percentage of home charging ---
 	const pctRow = row;

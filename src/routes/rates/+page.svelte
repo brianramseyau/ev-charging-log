@@ -48,11 +48,11 @@
 			</div>
 
 			{#if plan.type === 'flat'}
-				<p class="plan-card__rate">${plan.flatRate?.toFixed(3)} / kWh</p>
+				<p class="plan-card__rate">${plan.flatRate?.toFixed(5)} / kWh</p>
 			{:else}
 				<p class="plan-card__rate">
-					Peak: ${plan.peakRate?.toFixed(3)} / kWh &nbsp;·&nbsp; Off-peak: ${plan.offpeakRate?.toFixed(
-						3
+					Peak: ${plan.peakRate?.toFixed(5)} / kWh &nbsp;·&nbsp; Off-peak: ${plan.offpeakRate?.toFixed(
+						5
 					)} / kWh
 				</p>
 				<p class="plan-card__windows">Off-peak windows: {formatWindows(plan.offpeakWindows)}</p>
@@ -101,7 +101,7 @@
 			bind:value={flatRate}
 			label="Flat rate ($/kWh)"
 			type="number"
-			input$step="0.001"
+			input$step="0.00001"
 			input$min="0"
 			input$name="flatRate"
 			class="rate-form__field"
@@ -112,7 +112,7 @@
 			bind:value={peakRate}
 			label="Peak rate ($/kWh)"
 			type="number"
-			input$step="0.001"
+			input$step="0.00001"
 			input$min="0"
 			input$name="peakRate"
 			class="rate-form__field"
@@ -122,7 +122,7 @@
 			bind:value={offpeakRate}
 			label="Off-peak rate ($/kWh)"
 			type="number"
-			input$step="0.001"
+			input$step="0.00001"
 			input$min="0"
 			input$name="offpeakRate"
 			class="rate-form__field"

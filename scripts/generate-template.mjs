@@ -118,7 +118,7 @@ labelCell(sheet.getCell('A4'), 'Claiming kW/h:');
 sheet.getCell('B4').value = { formula: 'D11' };
 sheet.getCell('B4').numFmt = '#,##0.00';
 labelCell(sheet.getCell('D4'), 'Rate kW/h:');
-valueCell(sheet.getCell('E4'), 0.3, '$#,##0.000');
+valueCell(sheet.getCell('E4'), 0.3, '$#,##0.00000');
 
 // --- Home charging table ---
 titleRow(6, 'Home Charging');
