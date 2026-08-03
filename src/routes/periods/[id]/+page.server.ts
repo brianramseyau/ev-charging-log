@@ -1,8 +1,8 @@
 import { db } from '$lib/server/db';
 import { billingPeriods, chargingSessions } from '$lib/server/db/schema';
-import { asc, eq } from 'drizzle-orm';
-import { error } from '@sveltejs/kit';
-import type { PageServerLoad } from './$types';
+import { asc, eq, sql } from 'drizzle-orm';
+import { error, fail, redirect } from '@sveltejs/kit';
+import type { Actions, PageServerLoad } from './$types';
 
 export const load: PageServerLoad = async ({ params }) => {
 	const id = Number(params.id);
@@ -37,4 +37,25 @@ export const load: PageServerLoad = async ({ params }) => {
 			homePercentage
 		}
 	};
+};
+
+export const actions: Actions = {
+	delete: async ({ params }) => {
+		const id = Number(params.id);
+		if (!Number.isInteger(id)) throw error(404, 'Billing period not found');
+
+		const [{ count }] = await db
+			.select({ count: sql<number>`count(*)` })
+			.from(chargingSessions)
+			.where(eq(chargingSessions.billingPeriodId, id));
+
+		if (count > 0) {
+			return fail(400, {
+				error: 'This period has charging sessions logged against it and cannot be deleted.'
+			});
+		}
+
+		await db.delete(billingPeriods).where(eq(billingPeriods.id, id));
+		throw redirect(303, '/periods');
+	}
 };

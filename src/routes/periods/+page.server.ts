@@ -1,6 +1,6 @@
 import { db } from '$lib/server/db';
-import { billingPeriods } from '$lib/server/db/schema';
-import { desc } from 'drizzle-orm';
+import { billingPeriods, chargingSessions } from '$lib/server/db/schema';
+import { and, between, desc, isNull } from 'drizzle-orm';
 import { fail } from '@sveltejs/kit';
 import type { Actions, PageServerLoad } from './$types';
 
@@ -27,7 +27,23 @@ export const actions: Actions = {
 				endDate
 			});
 
-		await db.insert(billingPeriods).values({ label, startDate, endDate });
+		const [period] = await db
+			.insert(billingPeriods)
+			.values({ label, startDate, endDate })
+			.returning();
+
+		// Retroactively claim any sessions that fell outside every period's range
+		// at the time they were logged but are now covered by this new one.
+		await db
+			.update(chargingSessions)
+			.set({ billingPeriodId: period.id })
+			.where(
+				and(
+					isNull(chargingSessions.billingPeriodId),
+					between(chargingSessions.date, startDate, endDate)
+				)
+			);
+
 		return { success: true };
 	}
 };

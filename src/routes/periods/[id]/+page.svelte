@@ -1,10 +1,13 @@
 <script lang="ts">
+	import { enhance } from '$app/forms';
 	import Button, { Label } from '@smui/button';
 	import Card from '@smui/card';
 	import DataTable, { Head, Body, Row, Cell } from '@smui/data-table';
-	import type { PageData } from './$types';
+	import type { ActionData, PageData } from './$types';
 
-	let { data }: { data: PageData } = $props();
+	let { data, form }: { data: PageData; form: ActionData } = $props();
+
+	let isEmpty = $derived(data.homeSessions.length === 0 && data.publicSessions.length === 0);
 
 	function formatKwh(n: number) {
 		return `${n.toFixed(2)} kWh`;
@@ -63,6 +66,36 @@
 		<Label>Export report (.xlsx)</Label>
 	</Button>
 </a>
+
+{#if form?.error}
+	<p class="form-error">{form.error}</p>
+{/if}
+
+{#if isEmpty}
+	<form
+		method="POST"
+		action="?/delete"
+		use:enhance={() => {
+			return async ({ result, update }) => {
+				if (result.type === 'failure') {
+					form = result.data as ActionData;
+					return;
+				}
+				await update();
+			};
+		}}
+	>
+		<Button
+			variant="outlined"
+			class="delete-button"
+			onclick={(e: Event) => {
+				if (!confirm('Delete this billing period? This cannot be undone.')) e.preventDefault();
+			}}
+		>
+			<Label>Delete period</Label>
+		</Button>
+	</form>
+{/if}
 
 <section class="table-section">
 	<h2>Home charging</h2>
@@ -207,6 +240,18 @@
 
 	.export-link :global(.mdc-button) {
 		width: 100%;
+	}
+
+	.form-error {
+		color: #b91c1c;
+		font-size: 0.85rem;
+		margin: 0 0 0.75rem;
+	}
+
+	:global(.delete-button) {
+		width: 100%;
+		margin-bottom: 1.5rem;
+		color: #b91c1c !important;
 	}
 
 	.table-section {
