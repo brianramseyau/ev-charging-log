@@ -86,7 +86,7 @@
 			<table>
 				<thead>
 					<tr>
-						<th>Include</th>
+						<th>Exclude</th>
 						<th>Date</th>
 						<th>Time</th>
 						<th>Odometer (km)</th>
@@ -133,7 +133,7 @@
 			<table>
 				<thead>
 					<tr>
-						<th>Include</th>
+						<th>Exclude</th>
 						<th>Date</th>
 						<th>Time</th>
 						<th>Odometer (km)</th>

@@ -58,10 +58,34 @@ const TABLE_HEADER_COLUMNS = ['time', 'date', 'odometer', 'kwh used', 'location'
 
 const PUBLIC_TABLE_LABEL = /commercial charging.*already claimed/i;
 
+/**
+ * Formula cells come back from ExcelJS as `{ formula, result }` rather than a
+ * bare value, even when the cached result is itself a Date or number (e.g. a
+ * session date/time filled by dragging a formula down from the row above).
+ * Unwrap to the cached result so the rest of the parsing logic doesn't need
+ * to special-case formula cells.
+ */
+function unwrapFormula(value: ExcelJS.CellValue): ExcelJS.CellValue {
+	if (
+		value !== null &&
+		typeof value === 'object' &&
+		!(value instanceof Date) &&
+		!('richText' in value) &&
+		'result' in value
+	) {
+		return (value as { result: ExcelJS.CellValue }).result;
+	}
+	return value;
+}
+
 function cellText(value: ExcelJS.CellValue): string {
+	value = unwrapFormula(value);
 	if (value === null || value === undefined) return '';
+	if (value instanceof Date) {
+		return value.toISOString().slice(0, 10);
+	}
 	if (typeof value === 'object') {
-		// Rich text or formula result objects
+		// Rich text objects
 		if ('text' in value && typeof (value as { text?: unknown }).text === 'string') {
 			return (value as { text: string }).text;
 		}
@@ -69,18 +93,13 @@ function cellText(value: ExcelJS.CellValue): string {
 			const rich = (value as { richText: { text: string }[] }).richText;
 			return rich.map((r) => r.text).join('');
 		}
-		if ('result' in value) {
-			return String((value as { result: unknown }).result ?? '');
-		}
-		if (value instanceof Date) {
-			return value.toISOString().slice(0, 10);
-		}
 		return '';
 	}
 	return String(value).trim();
 }
 
 function toDateString(value: ExcelJS.CellValue): string | null {
+	value = unwrapFormula(value);
 	if (value === null || value === undefined || value === '') return null;
 	if (value instanceof Date) return value.toISOString().slice(0, 10);
 	const text = cellText(value);
@@ -91,6 +110,7 @@ function toDateString(value: ExcelJS.CellValue): string | null {
 }
 
 function toTimeString(value: ExcelJS.CellValue): string | null {
+	value = unwrapFormula(value);
 	if (value === null || value === undefined || value === '') return null;
 	if (value instanceof Date) {
 		const hh = String(value.getUTCHours()).padStart(2, '0');
@@ -101,12 +121,9 @@ function toTimeString(value: ExcelJS.CellValue): string | null {
 }
 
 function toNumber(value: ExcelJS.CellValue): number | null {
+	value = unwrapFormula(value);
 	if (value === null || value === undefined || value === '') return null;
 	if (typeof value === 'number') return value;
-	if (typeof value === 'object' && 'result' in (value as object)) {
-		const result = (value as { result: unknown }).result;
-		if (typeof result === 'number') return result;
-	}
 	const text = cellText(value).replace(/[^0-9.-]/g, '');
 	if (!text) return null;
 	const n = Number(text);
@@ -200,9 +217,7 @@ function readSessionTable(
 		if (
 			rowTexts.some(
 				(text) =>
-					text.startsWith('total') ||
-					text.startsWith('commercial') ||
-					text.startsWith('percentage')
+					text.startsWith('total') || text.startsWith('commercial') || text.startsWith('percentage')
 			)
 		) {
 			break;

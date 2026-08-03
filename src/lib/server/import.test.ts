@@ -10,8 +10,8 @@ import { parseImportWorkbook } from './import';
 interface FixtureOptions {
 	blankRowsBefore?: number;
 	blankRowsBetweenTables?: number;
-	homeRows?: (string | number | Date | null)[][];
-	publicRows?: (string | number | Date | null)[][];
+	homeRows?: ExcelJS.CellValue[][];
+	publicRows?: ExcelJS.CellValue[][];
 	/** Real-world files often never repeat the column header row for this table. */
 	publicHasHeaderRow?: boolean;
 }
@@ -226,6 +226,38 @@ describe('parseImportWorkbook', () => {
 
 		expect(result.homeSessions).toHaveLength(1);
 		expect(result.issues.filter((i) => i.section === 'home')).toHaveLength(0);
+	});
+
+	it('parses dates and times cached as formula results, not just bare values', async () => {
+		// Legacy files frequently fill session dates/times by dragging a formula
+		// down from the row above (e.g. `=B4+1`). ExcelJS returns these as
+		// `{ formula, result }` rather than a bare Date, even when the cached
+		// result is a Date — this must still resolve to a valid date/time.
+		const buffer = await buildFixture({
+			homeRows: [
+				[
+					{ formula: 'A1', result: new Date(Date.UTC(1899, 11, 31, 8, 30)) },
+					new Date('2026-07-01'),
+					12000,
+					8.5,
+					'Test User Garage'
+				],
+				[
+					{ formula: 'A2+1', result: new Date(Date.UTC(1899, 11, 31, 19, 15)) },
+					{ formula: 'B4+1', result: new Date('2026-07-05') },
+					12210,
+					10.2,
+					'Test User Garage'
+				]
+			]
+		});
+
+		const result = await parseImportWorkbook(buffer);
+
+		expect(result.issues.filter((i) => i.section === 'home')).toHaveLength(0);
+		expect(result.homeSessions).toHaveLength(2);
+		expect(result.homeSessions[0]).toMatchObject({ time: '08:30', date: '2026-07-01' });
+		expect(result.homeSessions[1]).toMatchObject({ time: '19:15', date: '2026-07-05' });
 	});
 
 	it('flags an unparseable home table when no table header row exists anywhere', async () => {
