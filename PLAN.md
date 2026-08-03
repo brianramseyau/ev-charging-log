@@ -42,14 +42,17 @@ The app's data model and report generator are built directly around this shape.
 | Area | Decision |
 |---|---|
 | Framework | SvelteKit only — no separate backend service. SvelteKit server routes/form actions serve as the API layer against SQLite directly. |
-| UI | Svelte + Material Design components. **Note:** MUI itself is React-only — the Svelte equivalent is **SMUI (Svelte Material UI)**, which will be used to match the "Material UI" look and feel. |
+| UI | Svelte + Material Design components. **Note:** MUI itself is React-only — the Svelte equivalent is **SMUI (Svelte Material UI)**, which will be used to match the "Material UI" look and feel. Built **mobile-first**: the app will almost always be used on a phone (logging a session standing at the charger), so layouts, forms, and navigation are designed for a small screen first and progressively enhanced for desktop, not the other way around. |
 | Persistence | SQLite via **Drizzle ORM** + `better-sqlite3`. Type-safe schema/queries, minimal ceremony, fits a single-user app. |
 | Report output | **Excel export matching the original template.** Use `exceljs` to load the original `.xlsx` as a template and fill in cells/rows, preserving the existing formatting/styles, rather than generating a layout from scratch. |
 | Historical import | Other monthly spreadsheets exist in the same layout and will be backfilled. Import parses header fields + both tables via `exceljs`, shows a preview/review screen, and commits on confirmation. |
-| Deployment | Self-hosted on home NAS (Docker), reachable on the home network only. |
+| Deployment | Self-hosted Docker container on **Unraid**, reachable on the home network only. No docker-compose — an **Unraid Community Applications template** is provided instead, since that's Unraid's native way to configure and launch a container. |
+| Container user mapping | Dockerfile follows the **linuxserver.io-style `PUID`/`PGID`** convention: container starts as root, an entrypoint script creates/adjusts a user to the given `PUID`/`PGID`, `chown`s the mounted data volume, then drops privileges (via `su-exec`/`gosu`) to run the app. This keeps file ownership on the Unraid array/cache correct instead of everything landing as root. |
 | Access control | None — the home network is the trust boundary. No login screen. |
 | Rate plans | Time-of-day windows. A rate plan is either `flat` (single rate) or `peak-offpeak` (peak/off-peak rates + configurable time windows, e.g. off-peak 22:00–07:00). Session cost is computed by splitting session time across the applicable windows. Rate plans are versioned by effective date, since rates change over time. |
 | Efficiency calc | km/kWh per session = (odometer at this session − odometer at previous session) ÷ kWh added this session. |
+| App type | Installable **PWA** from the start (manifest + service worker + icon set), not added on later. |
+| Branding | A generated EV-charging-themed logo/icon set for the PWA, and a custom error page with a cartoon "crashed EV" illustration (see §5.7). |
 
 ## 4. Data model (Drizzle schema, SQLite)
 
@@ -125,6 +128,17 @@ stay correct.
 - Simple KPI tiles: lifetime kWh, lifetime cost, average efficiency, current period % home.
 - (When building charts: consult the `dataviz` skill for chart/color/layout conventions before writing chart code.)
 
+### 5.6 PWA
+
+- Installable on desktop and mobile from day one (Add to Home Screen), since charging sessions will often be logged from a phone.
+- `manifest.webmanifest` (name, theme/background colour, icon set) + a service worker (via `@vite-pwa/sveltekit`) for an app shell/offline shell and installability.
+- Icon set generated from the master logo (see §5.7) at the standard PWA sizes (e.g. 192×192, 512×512, maskable variants, plus a favicon).
+
+### 5.7 Branding: logo & error page
+
+- **Logo**: an EV-charging-themed mark (car + charging plug/bolt motif) used as the app logo, PWA icon set, and favicon. Provided as a master SVG that's rasterized to the required PWA icon sizes during the scaffold phase.
+- **Error page**: SvelteKit's `+error.svelte` is replaced with a custom page featuring a cartoon "crashed EV" illustration and a light, "oh no, it crashed!" tone, rather than a bare stack trace — used for both unhandled app errors and the PWA offline fallback.
+
 ## 6. Non-goals (explicitly out of scope)
 
 - Multi-user auth, roles, or accounts.
@@ -141,7 +155,8 @@ stay correct.
 - **Spreadsheet I/O**: `exceljs` (both import parsing and template-based export).
 - **Charts**: lightweight Svelte-friendly charting lib (e.g. LayerChart or Chart.js via a thin wrapper) — final pick made during dashboard implementation.
 - **Testing**: Vitest for calculation logic (rate splitting, totals, efficiency, import parsing) — these are the parts most worth covering since they're the whole point of trusting the report.
-- **Deployment**: Dockerfile (multi-stage build) + docker-compose, SQLite file on a mounted volume so data survives container rebuilds.
+- **PWA**: `@vite-pwa/sveltekit` for manifest + service worker generation.
+- **Deployment**: multi-stage Dockerfile with a `PUID`/`PGID`-aware entrypoint script (linuxserver.io style — `su-exec`/`gosu` to drop from root to the mapped user after fixing ownership of the mounted data volume). No docker-compose; an **Unraid Community Applications template XML** is provided instead. SQLite file lives on a mounted volume so data survives container rebuilds.
 
 ## 8. Project structure (initial)
 
@@ -157,8 +172,12 @@ ev-charging-log/
         report.ts            -- exceljs template fill/export
         import.ts            -- legacy xlsx parsing
       components/            -- Svelte UI components (forms, tables, charts)
+      assets/
+        logo.svg               -- master EV-charging-themed logo
+        crashed-ev.svg         -- cartoon illustration used on the error page
     routes/
       +page.svelte            -- dashboard
+      +error.svelte            -- custom "crashed EV" error page
       sessions/+page.svelte    -- log/list sessions
       periods/                 -- billing period list/detail/report export
       rates/+page.svelte       -- rate plan management
@@ -166,23 +185,30 @@ ev-charging-log/
   drizzle/                     -- generated migrations
   static/
     templates/
-      home-charging-template.xlsx  -- the original file, used as export template
+      home-charging-template.xlsx  -- sanitized template, used as export template (see §10)
+    icons/                      -- generated PWA icon set (rasterized from the master logo)
+    manifest.webmanifest
+  docker/
+    entrypoint.sh                -- PUID/PGID handling (linuxserver.io style), then drops to that user
+  unraid/
+    ev-charging-log.xml          -- Unraid Community Applications template
   Dockerfile
-  docker-compose.yml
   PLAN.md
 ```
 
 ## 9. Build phases
 
-1. **Scaffold**: SvelteKit + TS project, SMUI theme wired up, Drizzle schema + migrations, Docker setup working end-to-end with an empty DB.
+1. **Scaffold**: SvelteKit + TS project, SMUI theme wired up, Drizzle schema + migrations, PWA plugin configured with a generated icon set, custom `+error.svelte`, Docker (with PUID/PGID entrypoint) working end-to-end against an empty DB.
 2. **Core logging**: settings, rate plans, session CRUD, billing period CRUD — no report/import yet.
 3. **Report generation**: rate-splitting/cost logic (with tests), exceljs export matching the original template, verified against the July 2026 file as a known-good case.
 4. **Historical import**: parser + review screen, backfill real historical data.
 5. **Dashboard**: efficiency + trend charts once there's enough real historical data to make them meaningful.
-6. **Deployment**: finalize Dockerfile/compose, deploy to NAS, confirm persistence across container restarts.
+6. **Deployment**: finalize Dockerfile + entrypoint, publish the Unraid Community Applications template, deploy to Unraid, confirm PUID/PGID ownership and data persistence across container rebuilds.
 
 ## 10. Open items to revisit during build
 
 - Confirm exact peak/off-peak window(s) and rates once you're on that plan, to validate the splitting logic against a real bill.
 - Decide final charting library once dashboard UI is underway.
 - Decide whether "public charging" sessions need their own cost tracking, or just kWh (since they're already claimed elsewhere and don't affect what you submit).
+- **Export template file**: the real `Record of Home Charging July 2026.xlsx` contains personal data (name, rego, home address) and is gitignored — it must never be committed. Before phase 3, create a **sanitized version** of the template (same layout/formatting, placeholder values) to check into `static/templates/` so the export feature has something to build/test against in the repo.
+- Confirm target Unraid PUID/PGID values (typically `99`/`100` for the default Unraid `nobody`/`users`, but check your setup) when writing the template defaults.

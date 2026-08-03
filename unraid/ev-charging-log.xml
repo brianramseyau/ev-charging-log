@@ -1,0 +1,20 @@
+<?xml version="1.0"?>
+<Container version="2">
+  <Name>ev-charging-log</Name>
+  <Repository>ghcr.io/brianramseyau/ev-charging-log:latest</Repository>
+  <Registry>https://ghcr.io/brianramseyau/ev-charging-log</Registry>
+  <Network>bridge</Network>
+  <Privileged>false</Privileged>
+  <Support/>
+  <Project>https://github.com/brianramseyau/ev-charging-log</Project>
+  <Overview>Self-hosted EV charging log: track home/public charging sessions, generate lease-company billing reports, and view a personal efficiency dashboard.</Overview>
+  <Category>Tools:</Category>
+  <WebUI>http://[IP]:[PORT:3000]/</WebUI>
+  <Icon>https://raw.githubusercontent.com/brianramseyau/ev-charging-log/main/static/icons/icon-512.png</Icon>
+
+  <Config Name="WebUI Port" Target="3000" Default="3000" Mode="tcp" Description="Port the app listens on inside the container" Type="Port" Display="always" Required="true">3000</Config>
+  <Config Name="Data" Target="/data" Default="/mnt/user/appdata/ev-charging-log" Mode="rw" Description="SQLite database and app data" Type="Path" Display="always" Required="true">/mnt/user/appdata/ev-charging-log</Config>
+  <Config Name="PUID" Target="PUID" Default="99" Mode="" Description="User ID to run the app as (default matches Unraid's 'nobody')" Type="Variable" Display="always" Required="true">99</Config>
+  <Config Name="PGID" Target="PGID" Default="100" Mode="" Description="Group ID to run the app as (default matches Unraid's 'users')" Type="Variable" Display="always" Required="true">100</Config>
+  <Config Name="TZ" Target="TZ" Default="Etc/UTC" Mode="" Description="Timezone, e.g. Australia/Melbourne" Type="Variable" Display="always" Required="false">Etc/UTC</Config>
+</Container>

@@ -1,0 +1,64 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 320" width="512" height="320">
+  <title>Crashed EV illustration for the error page</title>
+  <defs>
+    <linearGradient id="smoke" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#cbd5e1" stop-opacity="0.9"/>
+      <stop offset="1" stop-color="#cbd5e1" stop-opacity="0"/>
+    </linearGradient>
+  </defs>
+
+  <!-- ground / skid marks -->
+  <ellipse cx="256" cy="290" rx="200" ry="14" fill="#0f172a" opacity="0.08"/>
+  <path d="M40 270 q40 -18 90 -4" stroke="#0f172a" stroke-width="6" stroke-linecap="round" fill="none" opacity="0.25"/>
+  <path d="M70 278 q50 -20 110 -2" stroke="#0f172a" stroke-width="6" stroke-linecap="round" fill="none" opacity="0.2"/>
+
+  <!-- smoke puffs -->
+  <circle cx="360" cy="130" r="22" fill="url(#smoke)"/>
+  <circle cx="388" cy="100" r="16" fill="url(#smoke)"/>
+  <circle cx="404" cy="70" r="11" fill="url(#smoke)"/>
+
+  <!-- tilted crashed car -->
+  <g transform="translate(256,230) rotate(-8) translate(-160,-70)">
+    <path d="M8 96
+             C 8 70 24 58 46 54
+             L 70 20
+             C 78 8 92 2 108 2
+             L 220 2
+             C 236 2 250 8 258 20
+             L 282 54
+             C 304 58 320 70 320 96
+             L 320 132
+             C 320 140 313 146 305 146
+             L 280 146
+             C 280 125 263 108 242 108
+             C 221 108 204 125 204 146
+             L 124 146
+             C 124 125 107 108 86 108
+             C 65 108 48 125 48 146
+             L 23 146
+             C 15 146 8 140 8 132
+             Z"
+          fill="#f8fafc" stroke="#94a3b8" stroke-width="3"/>
+
+    <!-- cracked windshield -->
+    <path d="M96 54 L 118 22 C 122 16 129 12 137 12 L 190 12 L 190 54 Z" fill="#94a3b8" opacity="0.6"/>
+    <path d="M120 20 L 140 50 M 130 18 L 150 45 M 150 15 L 165 48" stroke="#475569" stroke-width="2"/>
+
+    <!-- X eyes on the headlight, dazed -->
+    <g stroke="#111827" stroke-width="5" stroke-linecap="round">
+      <path d="M292 60 L 304 72 M 304 60 L 292 72"/>
+    </g>
+
+    <!-- wheels, one wobbly -->
+    <circle cx="86" cy="146" r="30" fill="#111827"/>
+    <circle cx="86" cy="146" r="12" fill="#cbd5e1"/>
+    <circle cx="242" cy="150" r="28" fill="#111827" transform="rotate(20 242 150)"/>
+    <circle cx="242" cy="150" r="11" fill="#cbd5e1" transform="rotate(20 242 150)"/>
+  </g>
+
+  <!-- dizzy stars above the car -->
+  <g fill="#f59e0b">
+    <path d="M180 40 l4 10 10 2 -8 7 2 10 -8 -6 -8 6 2 -10 -8 -7 10 -2 z"/>
+    <path d="M220 20 l3 7 7 1 -5 5 1 7 -6 -4 -6 4 1 -7 -5 -5 7 -1 z"/>
+  </g>
+</svg>
