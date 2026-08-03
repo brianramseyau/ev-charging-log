@@ -1,7 +1,7 @@
 import { fail } from '@sveltejs/kit';
 import type { Actions, PageServerLoad } from './$types';
 import { db } from '$lib/server/db';
-import { billingPeriods, chargingSessions, ratePlans } from '$lib/server/db/schema';
+import { billingPeriods, chargingSessions, ratePlans, settings } from '$lib/server/db/schema';
 import { eq } from 'drizzle-orm';
 import {
 	findBillingPeriodId,
@@ -12,9 +12,10 @@ import {
 import { calculateSessionCost, resolveRatePlan } from '$lib/server/rates';
 
 export const load: PageServerLoad = async () => {
-	const [sessions, periods] = await Promise.all([
+	const [sessions, periods, [settingsRow]] = await Promise.all([
 		db.select().from(chargingSessions),
-		db.select().from(billingPeriods)
+		db.select().from(billingPeriods),
+		db.select().from(settings).limit(1)
 	]);
 
 	const periodLabelById = new Map(periods.map((period) => [period.id, period.label]));
@@ -26,7 +27,7 @@ export const load: PageServerLoad = async () => {
 			: null
 	}));
 
-	return { sessions: rows };
+	return { sessions: rows, homeAddress: settingsRow?.homeAddress ?? null };
 };
 
 type FormValues = {

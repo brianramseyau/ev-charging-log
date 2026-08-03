@@ -13,6 +13,7 @@ export const actions: Actions = {
 		const form = await request.formData();
 		const fullName = form.get('fullName')?.toString().trim();
 		const vehicleLabel = form.get('vehicleLabel')?.toString().trim();
+		const homeAddress = form.get('homeAddress')?.toString().trim() || null;
 
 		if (!fullName) return fail(400, { error: 'Full name is required.' });
 		if (!vehicleLabel) return fail(400, { error: 'Vehicle rego/VIN is required.' });
@@ -20,9 +21,9 @@ export const actions: Actions = {
 		const [existing] = await db.select().from(settings).limit(1);
 
 		if (existing) {
-			await db.update(settings).set({ fullName, vehicleLabel });
+			await db.update(settings).set({ fullName, vehicleLabel, homeAddress });
 		} else {
-			await db.insert(settings).values({ fullName, vehicleLabel });
+			await db.insert(settings).values({ fullName, vehicleLabel, homeAddress });
 		}
 
 		return { success: true };

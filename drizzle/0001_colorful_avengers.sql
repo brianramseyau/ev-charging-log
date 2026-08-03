@@ -1,0 +1,1 @@
+ALTER TABLE `settings` ADD `home_address` text;

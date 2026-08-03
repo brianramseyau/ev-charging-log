@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { enhance } from '$app/forms';
+	import { untrack } from 'svelte';
 	import Button, { Label } from '@smui/button';
 	import Card, { Content } from '@smui/card';
 	import IconButton from '@smui/icon-button';
@@ -7,6 +8,8 @@
 	import type { ActionData, PageData } from './$types';
 
 	let { data, form }: { data: PageData; form: ActionData } = $props();
+
+	const homeAddress = $derived(data.homeAddress ?? '');
 
 	// Local state for the add-session form. Re-seeded from the last submission's
 	// values whenever a validation failure comes back, so the user doesn't have
@@ -16,10 +19,20 @@
 	let time = $state('');
 	let odometerKm = $state('');
 	let kwhUsed = $state('');
-	let location = $state('');
+	let location = $state(data.homeAddress ?? '');
 	let notes = $state('');
 
 	let submitting = $state(false);
+
+	// Pre-populate Location with the saved home address whenever the user switches
+	// to a home session, but only if they haven't already typed something in.
+	$effect(() => {
+		if (kind === 'home') {
+			untrack(() => {
+				if (!location.trim()) location = homeAddress;
+			});
+		}
+	});
 
 	$effect(() => {
 		if (form?.values) {
@@ -39,7 +52,7 @@
 		time = '';
 		odometerKm = '';
 		kwhUsed = '';
-		location = '';
+		location = homeAddress;
 		notes = '';
 	}
 

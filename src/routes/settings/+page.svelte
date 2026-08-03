@@ -8,10 +8,12 @@
 
 	let fullName = $state('');
 	let vehicleLabel = $state('');
+	let homeAddress = $state('');
 
 	$effect(() => {
 		fullName = data.settings?.fullName ?? '';
 		vehicleLabel = data.settings?.vehicleLabel ?? '';
+		homeAddress = data.settings?.homeAddress ?? '';
 	});
 </script>
 
@@ -37,6 +39,13 @@
 				label="Vehicle (rego or VIN)"
 				bind:value={vehicleLabel}
 				input$name="vehicleLabel"
+				style="width: 100%"
+			/>
+			<Textfield
+				variant="outlined"
+				label="Home address (optional)"
+				bind:value={homeAddress}
+				input$name="homeAddress"
 				style="width: 100%"
 			/>
 

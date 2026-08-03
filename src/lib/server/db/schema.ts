@@ -3,7 +3,8 @@ import { integer, real, sqliteTable, text } from 'drizzle-orm/sqlite-core';
 export const settings = sqliteTable('settings', {
 	id: integer('id').primaryKey({ autoIncrement: true }),
 	fullName: text('full_name').notNull(),
-	vehicleLabel: text('vehicle_label').notNull() // rego or VIN, as printed on the report
+	vehicleLabel: text('vehicle_label').notNull(), // rego or VIN, as printed on the report
+	homeAddress: text('home_address') // pre-populates the Location field for home sessions
 });
 
 export const ratePlans = sqliteTable('rate_plans', {
