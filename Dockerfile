@@ -8,6 +8,11 @@ WORKDIR /app
 # compiles the theme CSS and PWA icon set from files in this repo.
 COPY . .
 RUN npm ci
+# SvelteKit's postbuild step imports every server module (including hooks.server.ts,
+# which opens the db connection and runs migrations) to analyse the route graph, so
+# it needs *some* writable DATABASE_URL even though this throwaway build-time
+# database is discarded — the real one is set for the runtime stage below.
+ENV DATABASE_URL=/tmp/build-time.db
 RUN npm run build
 
 # ---- production dependencies (separate from build, so devDependencies never ship) ----
