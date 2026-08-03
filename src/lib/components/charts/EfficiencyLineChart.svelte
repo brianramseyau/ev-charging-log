@@ -62,7 +62,7 @@
 			onpointerleave={handlePointerLeave}
 		>
 			<g transform="translate({margin.left},{margin.top})">
-				{#each yTicks as tick (tick)}
+				{#each yTicks as tick, i (i)}
 					<line x1="0" x2={plotWidth} y1={yScale(tick)} y2={yScale(tick)} class="gridline" />
 					<text x="-8" y={yScale(tick)} class="tick-label" text-anchor="end" dy="0.32em"
 						>{tick}</text

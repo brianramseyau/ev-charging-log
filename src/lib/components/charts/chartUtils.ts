@@ -15,7 +15,8 @@ export function niceTicks(min: number, max: number, targetCount = 4): number[] {
 	const ticks: number[] = [];
 	const start = Math.floor(lo / step) * step;
 	for (let t = start; t <= hi + step * 0.001; t += step) {
-		ticks.push(Math.round(t * 1000) / 1000);
+		const rounded = Math.round(t * 1000) / 1000;
+		if (ticks[ticks.length - 1] !== rounded) ticks.push(rounded);
 	}
 	return ticks;
 }
