@@ -260,6 +260,45 @@ describe('parseImportWorkbook', () => {
 		expect(result.homeSessions[1]).toMatchObject({ time: '19:15', date: '2026-07-05' });
 	});
 
+	it('normalizes 12-hour AM/PM time text instead of silently dropping it', async () => {
+		// Some months' files enter times as 12-hour text ("8:30 AM") instead of
+		// an Excel time value. `<input type="time">` requires 24-hour HH:MM, so
+		// this must be converted rather than passed through as-is.
+		const buffer = await buildFixture({
+			homeRows: [
+				['8:30 AM', new Date('2026-03-01'), 12000, 8.5, 'Test User Garage'],
+				['7:15 PM', new Date('2026-03-05'), 12210, 10.2, 'Test User Garage'],
+				['12:00 AM', new Date('2026-03-10'), 12300, 5.0, 'Test User Garage'],
+				['12:30 PM', new Date('2026-03-12'), 12400, 6.0, 'Test User Garage']
+			]
+		});
+
+		const result = await parseImportWorkbook(buffer);
+
+		expect(result.issues.filter((i) => i.section === 'home')).toHaveLength(0);
+		expect(result.homeSessions).toHaveLength(4);
+		expect(result.homeSessions[0].time).toBe('08:30');
+		expect(result.homeSessions[1].time).toBe('19:15');
+		expect(result.homeSessions[2].time).toBe('00:00');
+		expect(result.homeSessions[3].time).toBe('12:30');
+	});
+
+	it('flags a row instead of silently dropping unparseable date/time text', async () => {
+		const buffer = await buildFixture({
+			homeRows: [['not a time', 'not a date', 12000, 8.5, 'Test User Garage']]
+		});
+
+		const result = await parseImportWorkbook(buffer);
+
+		expect(result.homeSessions).toHaveLength(1);
+		expect(result.homeSessions[0].time).toBeNull();
+		expect(result.homeSessions[0].date).toBeNull();
+
+		const rowIssues = result.issues.filter((i) => i.section === 'home');
+		expect(rowIssues.length).toBeGreaterThan(0);
+		expect(rowIssues[0].message).toMatch(/missing/i);
+	});
+
 	it('flags an unparseable home table when no table header row exists anywhere', async () => {
 		// Build a minimal sheet with only header fields and a malformed table
 		// header (missing the Location column) — no valid 5-column header row

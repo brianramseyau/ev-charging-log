@@ -106,7 +106,39 @@ function toDateString(value: ExcelJS.CellValue): string | null {
 	if (!text) return null;
 	const parsed = new Date(text);
 	if (!Number.isNaN(parsed.getTime())) return parsed.toISOString().slice(0, 10);
-	return text;
+	// Unparseable text (not a recognizable date and not already YYYY-MM-DD)
+	// must not pass through as-is — `<input type="date">` silently blanks it
+	// with no visible error, so treat it as missing instead so it's flagged.
+	return /^\d{4}-\d{2}-\d{2}$/.test(text) ? text : null;
+}
+
+const TIME_12H_PATTERN = /^(\d{1,2}):(\d{2})(?::\d{2})?\s*([AaPp][Mm])$/;
+const TIME_24H_PATTERN = /^(\d{1,2}):(\d{2})(?::\d{2})?$/;
+
+/**
+ * Some legacy files enter times as 12-hour text ("8:30 AM") rather than an
+ * Excel time value, which `<input type="time">` can't accept (it requires
+ * 24-hour HH:MM) — convert here so it round-trips instead of silently
+ * failing validation on the review page.
+ */
+function normalizeTimeText(text: string): string | null {
+	const ampm = TIME_12H_PATTERN.exec(text);
+	if (ampm) {
+		let hh = Number(ampm[1]);
+		const mm = ampm[2];
+		const isPm = ampm[3].toLowerCase() === 'pm';
+		if (hh === 12) hh = 0;
+		if (isPm) hh += 12;
+		return `${String(hh).padStart(2, '0')}:${mm}`;
+	}
+	const plain = TIME_24H_PATTERN.exec(text);
+	if (plain) {
+		const hh = Number(plain[1]);
+		const mm = plain[2];
+		if (hh > 23) return null;
+		return `${String(hh).padStart(2, '0')}:${mm}`;
+	}
+	return null;
 }
 
 function toTimeString(value: ExcelJS.CellValue): string | null {
@@ -117,7 +149,9 @@ function toTimeString(value: ExcelJS.CellValue): string | null {
 		const mm = String(value.getUTCMinutes()).padStart(2, '0');
 		return `${hh}:${mm}`;
 	}
-	return cellText(value) || null;
+	const text = cellText(value);
+	if (!text) return null;
+	return normalizeTimeText(text.trim());
 }
 
 function toNumber(value: ExcelJS.CellValue): number | null {
