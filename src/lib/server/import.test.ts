@@ -12,6 +12,8 @@ interface FixtureOptions {
 	blankRowsBetweenTables?: number;
 	homeRows?: (string | number | Date | null)[][];
 	publicRows?: (string | number | Date | null)[][];
+	/** Real-world files often never repeat the column header row for this table. */
+	publicHasHeaderRow?: boolean;
 }
 
 async function buildFixture(options: FixtureOptions = {}): Promise<Buffer> {
@@ -22,7 +24,8 @@ async function buildFixture(options: FixtureOptions = {}): Promise<Buffer> {
 			['08:30', new Date('2026-07-01'), 12000, 8.5, 'Test User Garage'],
 			['19:15', new Date('2026-07-05'), 12210, 10.2, 'Test User Garage']
 		],
-		publicRows = [['13:00', new Date('2026-07-10'), 12400, 15.0, '123 Fake St Charger']]
+		publicRows = [['13:00', new Date('2026-07-10'), 12400, 15.0, '123 Fake St Charger']],
+		publicHasHeaderRow = true
 	} = options;
 
 	const workbook = new ExcelJS.Workbook();
@@ -71,10 +74,12 @@ async function buildFixture(options: FixtureOptions = {}): Promise<Buffer> {
 	r++;
 	r++; // blank spacer
 
-	['Time', 'Date', 'Odometer', 'kWh Used', 'Location'].forEach((label, i) => {
-		sheet.getCell(r, i + 1).value = label;
-	});
-	r++;
+	if (publicHasHeaderRow) {
+		['Time', 'Date', 'Odometer', 'kWh Used', 'Location'].forEach((label, i) => {
+			sheet.getCell(r, i + 1).value = label;
+		});
+		r++;
+	}
 
 	for (const dataRow of publicRows) {
 		dataRow.forEach((v, i) => {
@@ -172,6 +177,55 @@ describe('parseImportWorkbook', () => {
 		expect(result.homeSessions).toHaveLength(2);
 		expect(result.publicSessions).toHaveLength(1);
 		expect(result.issues).toHaveLength(0);
+	});
+
+	it('parses the public table when it has no header row of its own (real-world layout)', async () => {
+		// Matches the actual legacy file layout: the public/commercial table
+		// reuses the home table's column order but never repeats the header
+		// row, and its "Total"/"Percentage" summary rows put their label in
+		// the date/odometer columns rather than the time column.
+		const buffer = await buildFixture({ publicHasHeaderRow: false });
+		const result = await parseImportWorkbook(buffer);
+
+		expect(result.issues.filter((i) => i.section === 'public')).toHaveLength(0);
+		expect(result.publicSessions).toHaveLength(1);
+		expect(result.publicSessions[0]).toMatchObject({
+			kind: 'public',
+			date: '2026-07-10',
+			odometerKm: 12400,
+			kwhUsed: 15,
+			location: '123 Fake St Charger'
+		});
+	});
+
+	it('stops a session table at a summary row even when the label lands outside the time column', async () => {
+		const workbook = new ExcelJS.Workbook();
+		const sheet = workbook.addWorksheet('Sheet1');
+		sheet.getCell('A1').value = 'Full Name:';
+		sheet.getCell('B1').value = 'Test User';
+
+		['Time', 'Date', 'Odometer', 'kWh Used', 'Location'].forEach((label, i) => {
+			sheet.getCell(3, i + 1).value = label;
+		});
+		sheet.getCell('A4').value = '08:30';
+		sheet.getCell('B4').value = new Date('2026-07-01');
+		sheet.getCell('C4').value = 12000;
+		sheet.getCell('D4').value = 8.5;
+		sheet.getCell('E4').value = 'Test User Garage';
+
+		// Summary row: label sits in columns B/C (date/odometer), not A (time),
+		// mirroring the real spreadsheet's "Total Kwh Used" / "Total Kwh Used" pair.
+		sheet.getCell('B5').value = 'Total Kwh Used';
+		sheet.getCell('C5').value = 'Total Kwh Used';
+		sheet.getCell('D5').value = 8.5;
+
+		const arrayBuffer = await workbook.xlsx.writeBuffer();
+		const buffer = Buffer.from(arrayBuffer);
+
+		const result = await parseImportWorkbook(buffer);
+
+		expect(result.homeSessions).toHaveLength(1);
+		expect(result.issues.filter((i) => i.section === 'home')).toHaveLength(0);
 	});
 
 	it('flags an unparseable home table when no table header row exists anywhere', async () => {

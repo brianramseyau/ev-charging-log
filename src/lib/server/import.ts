@@ -138,9 +138,10 @@ function findLabelCell(
  */
 function findTableHeaderRow(
 	sheet: ExcelJS.Worksheet,
-	fromRow: number
+	fromRow: number,
+	toRow?: number
 ): { row: number; columns: Record<string, number> } | null {
-	const maxRow = sheet.rowCount;
+	const maxRow = toRow !== undefined ? Math.min(toRow, sheet.rowCount) : sheet.rowCount;
 	for (let r = fromRow; r <= maxRow; r++) {
 		const row = sheet.getRow(r);
 		const columns: Record<string, number> = {};
@@ -191,11 +192,18 @@ function readSessionTable(
 		}
 
 		// A row of text that looks like the next section's label ends the table too.
-		const rowText = cellText(row.getCell(columns['time']).value).toLowerCase();
+		// Summary rows (e.g. "Total Kwh Used") don't consistently land in the
+		// "time" column — check every mapped column, not just that one.
+		const rowTexts = [timeVal, dateVal, odoVal, kwhVal, locVal].map((v) =>
+			cellText(v).toLowerCase()
+		);
 		if (
-			rowText.startsWith('total') ||
-			rowText.startsWith('commercial') ||
-			rowText.startsWith('percentage')
+			rowTexts.some(
+				(text) =>
+					text.startsWith('total') ||
+					text.startsWith('commercial') ||
+					text.startsWith('percentage')
+			)
 		) {
 			break;
 		}
@@ -320,21 +328,23 @@ export async function parseImportWorkbook(buffer: Buffer | ArrayBuffer): Promise
 				message: 'Could not locate the commercial/public charging section label.'
 			});
 		} else {
-			const publicHeader = findTableHeaderRow(sheet, publicLabelCell.row + 1);
-			if (!publicHeader) {
-				issues.push({
-					section: 'public',
-					message: 'Could not locate the public charging table header row.'
-				});
-			} else {
-				publicSessions = readSessionTable(
-					sheet,
-					publicHeader.row,
-					publicHeader.columns,
-					'public',
-					issues
-				);
-			}
+			// Some files never repeat the column header row for this table — data
+			// rows start right after the label, reusing the home table's column
+			// layout. Only look for an explicit header on the row immediately
+			// after the label (allowing one blank spacer row), so we don't
+			// accidentally pick up an unrelated header-shaped row further down.
+			const publicHeader = findTableHeaderRow(
+				sheet,
+				publicLabelCell.row + 1,
+				publicLabelCell.row + 2
+			);
+			publicSessions = readSessionTable(
+				sheet,
+				publicHeader ? publicHeader.row : publicLabelCell.row,
+				publicHeader ? publicHeader.columns : homeHeader.columns,
+				'public',
+				issues
+			);
 		}
 	}
 
