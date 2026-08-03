@@ -14,7 +14,7 @@
 	}
 
 	function formatCost(n: number) {
-		return n.toLocaleString(undefined, { style: 'currency', currency: 'USD' });
+		return `$${n.toFixed(2)}`;
 	}
 
 	function formatPercent(n: number | null) {
