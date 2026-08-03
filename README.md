@@ -41,10 +41,11 @@ npm run dev
 npm run dev -- --open
 ```
 
-Drizzle schema changes are pushed to the local SQLite file with:
+Migrations apply automatically on server boot (see `src/hooks.server.ts`). If
+you change `src/lib/server/db/schema.ts`, generate a new migration file with:
 
 ```sh
-npm run db:push
+npm run db:generate
 ```
 
 ## Building
@@ -57,9 +58,21 @@ npm run build
 
 You can preview the production build with `npm run preview`.
 
+## Deploying
+
+`docker build -t ev-charging-log .` builds a production image with a
+linuxserver.io-style `PUID`/`PGID` entrypoint (see `docker/entrypoint.sh`) so
+files written to the mounted `/data` volume end up owned by the right user —
+no docker-compose needed. On Unraid, use the template at
+[unraid/ev-charging-log.xml](unraid/ev-charging-log.xml).
+
 ## Status
 
-Early build stage — see [PLAN.md](PLAN.md) for the build phases.
+Core features are built: session logging, rate plans (flat + peak/off-peak),
+billing periods with xlsx report export, historical import, a personal
+dashboard, and settings — all mobile-first with SMUI, running as a PWA. See
+[PLAN.md](PLAN.md) for the original design and remaining open items (§10),
+such as confirming real peak/off-peak rates once you're on that plan.
 
 ## A note on privacy
 
