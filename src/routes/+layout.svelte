@@ -5,7 +5,11 @@
 	let { children } = $props();
 
 	const navItems = [
-		{ href: '/', label: 'Dashboard', icon: 'M4 13h7V4H4v9zm0 7h7v-5H4v5zm9 0h7V11h-7v9zm0-16v5h7V4h-7z' },
+		{
+			href: '/',
+			label: 'Dashboard',
+			icon: 'M4 13h7V4H4v9zm0 7h7v-5H4v5zm9 0h7V11h-7v9zm0-16v5h7V4h-7z'
+		},
 		{
 			href: '/sessions',
 			label: 'Sessions',

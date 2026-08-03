@@ -1,2 +1,170 @@
-<h1>Dashboard</h1>
-<p>Efficiency and charging trends will show up here once there's some data logged.</p>
+<script lang="ts">
+	import Card, { Content } from '@smui/card';
+	import { formatCompact } from '$lib/components/charts/chartUtils';
+	import EfficiencyLineChart from '$lib/components/charts/EfficiencyLineChart.svelte';
+	import HomePublicSplitChart from '$lib/components/charts/HomePublicSplitChart.svelte';
+	import CostTrendChart from '$lib/components/charts/CostTrendChart.svelte';
+	import type { PageData } from './$types';
+
+	let { data }: { data: PageData } = $props();
+
+	const hasAnyData = $derived(
+		data.efficiencySeries.length > 0 ||
+			data.periodSplits.length > 0 ||
+			data.kpis.lifetimeHomeKwh > 0
+	);
+</script>
+
+<svelte:head>
+	<title>Dashboard · EV Charging Log</title>
+</svelte:head>
+
+<h1 class="page-title">Dashboard</h1>
+
+{#if !hasAnyData}
+	<p class="empty-state">
+		No charging sessions logged yet. Once you log a session (and it's assigned to a billing period),
+		your efficiency trend, home/public split, and cost history will show up here.
+	</p>
+{/if}
+
+<div class="kpi-row">
+	<Card padded class="kpi-card">
+		<Content>
+			<p class="kpi-label">Lifetime home kWh</p>
+			<p class="kpi-value">{formatCompact(data.kpis.lifetimeHomeKwh)}</p>
+		</Content>
+	</Card>
+
+	<Card padded class="kpi-card">
+		<Content>
+			<p class="kpi-label">Lifetime cost</p>
+			<p class="kpi-value">{formatCompact(data.kpis.lifetimeCost, { currency: true })}</p>
+		</Content>
+	</Card>
+
+	<Card padded class="kpi-card">
+		<Content>
+			<p class="kpi-label">Avg efficiency</p>
+			<p class="kpi-value">
+				{data.kpis.avgEfficiency != null ? `${data.kpis.avgEfficiency.toFixed(2)} km/kWh` : '—'}
+			</p>
+		</Content>
+	</Card>
+
+	<Card padded class="kpi-card">
+		<Content>
+			<p class="kpi-label">
+				{data.kpis.currentPeriod
+					? `${data.kpis.currentPeriod.label} % home`
+					: 'Current period % home'}
+			</p>
+			<p class="kpi-value">
+				{data.kpis.currentPeriod?.homePct != null
+					? `${Math.round(data.kpis.currentPeriod.homePct * 100)}%`
+					: '—'}
+			</p>
+		</Content>
+	</Card>
+</div>
+
+<section class="chart-card">
+	<h2 class="chart-title">Efficiency over time</h2>
+	<p class="chart-subtitle">km driven per kWh, per home-charging session</p>
+	<EfficiencyLineChart points={data.efficiencySeries} />
+</section>
+
+<section class="chart-card">
+	<h2 class="chart-title">Home vs public charging</h2>
+	<p class="chart-subtitle">kWh by billing period</p>
+	<HomePublicSplitChart periods={data.periodSplits} />
+</section>
+
+<section class="chart-card">
+	<h2 class="chart-title">Cost per period</h2>
+	<p class="chart-subtitle">Home charging cost, by billing period</p>
+	<CostTrendChart periods={data.periodSplits} />
+</section>
+
+<style>
+	.page-title {
+		font-size: 1.3rem;
+		margin: 0 0 1rem;
+	}
+
+	.empty-state {
+		background: var(--empty-surface, #f1f5f9);
+		border-radius: 8px;
+		padding: 0.85rem 1rem;
+		font-size: 0.9rem;
+		color: #475569;
+		margin: 0 0 1rem;
+	}
+
+	@media (prefers-color-scheme: dark) {
+		.empty-state {
+			background: #1e293b;
+			color: #cbd5e1;
+		}
+	}
+
+	.kpi-row {
+		display: grid;
+		grid-template-columns: 1fr;
+		gap: 0.75rem;
+		margin-bottom: 1.25rem;
+	}
+
+	@media (min-width: 480px) {
+		.kpi-row {
+			grid-template-columns: repeat(2, 1fr);
+		}
+	}
+
+	@media (min-width: 720px) {
+		.kpi-row {
+			grid-template-columns: repeat(4, 1fr);
+		}
+	}
+
+	.kpi-label {
+		margin: 0 0 0.25rem;
+		font-size: 0.75rem;
+		color: #64748b;
+		text-transform: uppercase;
+		letter-spacing: 0.02em;
+	}
+
+	.kpi-value {
+		margin: 0;
+		font-size: 1.4rem;
+		font-weight: 600;
+	}
+
+	@media (prefers-color-scheme: dark) {
+		.kpi-label {
+			color: #94a3b8;
+		}
+	}
+
+	.chart-card {
+		margin-bottom: 1.5rem;
+	}
+
+	.chart-title {
+		font-size: 1rem;
+		margin: 0 0 0.15rem;
+	}
+
+	.chart-subtitle {
+		font-size: 0.8rem;
+		color: #64748b;
+		margin: 0 0 0.5rem;
+	}
+
+	@media (prefers-color-scheme: dark) {
+		.chart-subtitle {
+			color: #94a3b8;
+		}
+	}
+</style>
