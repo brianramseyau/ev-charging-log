@@ -4,22 +4,22 @@
 
 // EV Charging Log theme (Dark)
 @use '@smui/common/theme/index' as theme with (
-  $primary: #2dd4bf,
-  $secondary: #38bdf8,
-  $surface: color.adjust(color-palette.$grey-900, $blue: +4),
-  $background: #000,
-  $error: color-palette.$red-700
+	$primary: #2dd4bf,
+	$secondary: #38bdf8,
+	$surface: color.adjust(color-palette.$grey-900, $blue: +4),
+	$background: #000,
+	$error: color-palette.$red-700
 );
 
 html,
 body {
-  background-color: #000;
-  color: theme.$on-surface;
+	background-color: #000;
+	color: theme.$on-surface;
 }
 
 a {
-  color: theme.$secondary;
+	color: theme.$secondary;
 }
 a:visited {
-  color: color.scale(theme.$secondary, $lightness: -35%);
+	color: color.scale(theme.$secondary, $lightness: -35%);
 }

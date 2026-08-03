@@ -14,7 +14,9 @@ export const ratePlans = sqliteTable('rate_plans', {
 	peakRate: real('peak_rate'), // $/kWh, set when type = 'peak_offpeak'
 	offpeakRate: real('offpeak_rate'), // $/kWh, set when type = 'peak_offpeak'
 	// JSON array of { start: "HH:mm", end: "HH:mm" } off-peak windows
-	offpeakWindows: text('offpeak_windows', { mode: 'json' }).$type<{ start: string; end: string }[]>()
+	offpeakWindows: text('offpeak_windows', { mode: 'json' }).$type<
+		{ start: string; end: string }[]
+	>()
 });
 
 export const billingPeriods = sqliteTable('billing_periods', {
