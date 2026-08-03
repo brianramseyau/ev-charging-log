@@ -153,7 +153,10 @@ export async function generateReport(
 	// or down. Wipe everything below the header block first so leftover template rows
 	// (or a previous, differently-sized export) never bleed through into the real report.
 	const CLEAR_FROM_ROW = 5;
-	const clearThroughRow = Math.max(sheet.rowCount, CLEAR_FROM_ROW + homeSessions.length + publicSessions.length + 20);
+	const clearThroughRow = Math.max(
+		sheet.rowCount,
+		CLEAR_FROM_ROW + homeSessions.length + publicSessions.length + 20
+	);
 	for (let r = CLEAR_FROM_ROW; r <= clearThroughRow; r++) {
 		try {
 			sheet.unMergeCells(r, 1, r, 5);
