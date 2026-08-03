@@ -94,11 +94,11 @@
 			<div class="field-group">
 				<span class="field-label">Kind</span>
 				<div class="kind-toggle" role="radiogroup" aria-label="Charging kind">
-					<label class:selected={kind === 'home'}>
+					<label class:selected={kind === 'home'} class="kind-toggle__home">
 						<input type="radio" name="kind" value="home" bind:group={kind} />
 						Home
 					</label>
-					<label class:selected={kind === 'public'}>
+					<label class:selected={kind === 'public'} class="kind-toggle__public">
 						<input type="radio" name="kind" value="public" bind:group={kind} />
 						Public
 					</label>
@@ -314,10 +314,19 @@
 	}
 
 	.kind-toggle label.selected {
-		border-color: #0f766e;
-		background: rgba(15, 118, 110, 0.08);
-		color: #0f766e;
 		font-weight: 600;
+	}
+
+	.kind-toggle__home.selected {
+		border-color: var(--charge-home-color);
+		background: color-mix(in srgb, var(--charge-home-color) 10%, transparent);
+		color: var(--charge-home-color);
+	}
+
+	.kind-toggle__public.selected {
+		border-color: var(--charge-public-color);
+		background: color-mix(in srgb, var(--charge-public-color) 10%, transparent);
+		color: var(--charge-public-color);
 	}
 
 	.kind-toggle input {
@@ -392,13 +401,13 @@
 		font-size: 0.7rem;
 		font-weight: 700;
 		text-transform: uppercase;
-		background: #e0f2fe;
-		color: #0369a1;
+		background: color-mix(in srgb, var(--charge-public-color) 15%, white);
+		color: var(--charge-public-color);
 	}
 
 	.badge--home {
-		background: #ccfbf1;
-		color: #0f766e;
+		background: color-mix(in srgb, var(--charge-home-color) 15%, white);
+		color: var(--charge-home-color);
 	}
 
 	.session-row__details {
@@ -443,10 +452,14 @@
 			border-color: rgba(255, 255, 255, 0.2);
 		}
 
-		.kind-toggle label.selected {
-			border-color: #2dd4bf;
-			background: rgba(45, 212, 191, 0.12);
-			color: #2dd4bf;
+		.badge {
+			background: color-mix(in srgb, var(--charge-public-color) 25%, black);
+			color: #fff;
+		}
+
+		.badge--home {
+			background: color-mix(in srgb, var(--charge-home-color) 25%, black);
+			color: #fff;
 		}
 
 		.empty-state {

@@ -72,6 +72,11 @@
 		height: 100%;
 	}
 
+	:global(html) {
+		--charge-home-color: #3987e5;
+		--charge-public-color: #d95926;
+	}
+
 	:global(body) {
 		margin: 0;
 		font-family:

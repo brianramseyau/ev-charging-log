@@ -147,8 +147,8 @@
 		--text-secondary: #52514e;
 		--text-muted: #898781;
 		--gridline: #e1e0d9;
-		--series-1: #2a78d6;
-		--series-2: #eb6834;
+		--series-1: var(--charge-home-color);
+		--series-2: var(--charge-public-color);
 		position: relative;
 	}
 
@@ -160,8 +160,6 @@
 			--text-secondary: #c3c2b7;
 			--text-muted: #898781;
 			--gridline: #2c2c2a;
-			--series-1: #3987e5;
-			--series-2: #d95926;
 		}
 	}
 
