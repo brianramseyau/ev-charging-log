@@ -19,6 +19,7 @@ Single user, single vehicle. No multi-tenancy, no auth (see §6).
 Reverse-engineered from `Record of Home Charging July 2026.xlsx`:
 
 **Header block**
+
 - Full Name, VIN/Registration
 - Starting Date / Closing Date (the electricity bill period)
 - `Claiming kW/h` — total home kWh for the period
@@ -28,9 +29,10 @@ Reverse-engineered from `Record of Home Charging July 2026.xlsx`:
 `Time | Date | Odometer | kWh Used | Location`
 
 **Commercial charging table** ("already claimed through portal") — same columns,
-listed separately since it's *not* being claimed again from the lease company.
+listed separately since it's _not_ being claimed again from the lease company.
 
 **Summary rows**
+
 - Total kWh Used (home) → Cost = Total kWh × Rate
 - Total kWh Claimed (public)
 - Percentage of Home charging = home kWh ÷ (home kWh + public kWh)
@@ -39,20 +41,20 @@ The app's data model and report generator are built directly around this shape.
 
 ## 3. Decisions (confirmed with user)
 
-| Area | Decision |
-|---|---|
-| Framework | SvelteKit only — no separate backend service. SvelteKit server routes/form actions serve as the API layer against SQLite directly. |
-| UI | Svelte + Material Design components. **Note:** MUI itself is React-only — the Svelte equivalent is **SMUI (Svelte Material UI)**, which will be used to match the "Material UI" look and feel. Built **mobile-first**: the app will almost always be used on a phone (logging a session standing at the charger), so layouts, forms, and navigation are designed for a small screen first and progressively enhanced for desktop, not the other way around. |
-| Persistence | SQLite via **Drizzle ORM** + `better-sqlite3`. Type-safe schema/queries, minimal ceremony, fits a single-user app. |
-| Report output | **Excel export matching the original template.** Use `exceljs` to load the original `.xlsx` as a template and fill in cells/rows, preserving the existing formatting/styles, rather than generating a layout from scratch. |
-| Historical import | Other monthly spreadsheets exist in the same layout and will be backfilled. Import parses header fields + both tables via `exceljs`, shows a preview/review screen, and commits on confirmation. |
-| Deployment | Self-hosted Docker container on **Unraid**, reachable on the home network only. No docker-compose — an **Unraid Community Applications template** is provided instead, since that's Unraid's native way to configure and launch a container. |
-| Container user mapping | Dockerfile follows the **linuxserver.io-style `PUID`/`PGID`** convention: container starts as root, an entrypoint script creates/adjusts a user to the given `PUID`/`PGID`, `chown`s the mounted data volume, then drops privileges (via `su-exec`/`gosu`) to run the app. This keeps file ownership on the Unraid array/cache correct instead of everything landing as root. |
-| Access control | None — the home network is the trust boundary. No login screen. |
-| Rate plans | Time-of-day windows. A rate plan is either `flat` (single rate) or `peak-offpeak` (peak/off-peak rates + configurable time windows, e.g. off-peak 22:00–07:00). Session cost is computed by splitting session time across the applicable windows. Rate plans are versioned by effective date, since rates change over time. |
-| Efficiency calc | km/kWh per session = (odometer at this session − odometer at previous session) ÷ kWh added this session. |
-| App type | Installable **PWA** from the start (manifest + service worker + icon set), not added on later. |
-| Branding | A generated EV-charging-themed logo/icon set for the PWA, and a custom error page with a cartoon "crashed EV" illustration (see §5.7). |
+| Area                   | Decision                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| ---------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Framework              | SvelteKit only — no separate backend service. SvelteKit server routes/form actions serve as the API layer against SQLite directly.                                                                                                                                                                                                                                                                                                                          |
+| UI                     | Svelte + Material Design components. **Note:** MUI itself is React-only — the Svelte equivalent is **SMUI (Svelte Material UI)**, which will be used to match the "Material UI" look and feel. Built **mobile-first**: the app will almost always be used on a phone (logging a session standing at the charger), so layouts, forms, and navigation are designed for a small screen first and progressively enhanced for desktop, not the other way around. |
+| Persistence            | SQLite via **Drizzle ORM** + `better-sqlite3`. Type-safe schema/queries, minimal ceremony, fits a single-user app.                                                                                                                                                                                                                                                                                                                                          |
+| Report output          | **Excel export matching the original template.** Use `exceljs` to load the original `.xlsx` as a template and fill in cells/rows, preserving the existing formatting/styles, rather than generating a layout from scratch.                                                                                                                                                                                                                                  |
+| Historical import      | Other monthly spreadsheets exist in the same layout and will be backfilled. Import parses header fields + both tables via `exceljs`, shows a preview/review screen, and commits on confirmation.                                                                                                                                                                                                                                                            |
+| Deployment             | Self-hosted Docker container on **Unraid**, reachable on the home network only. No docker-compose — an **Unraid Community Applications template** is provided instead, since that's Unraid's native way to configure and launch a container.                                                                                                                                                                                                                |
+| Container user mapping | Dockerfile follows the **linuxserver.io-style `PUID`/`PGID`** convention: container starts as root, an entrypoint script creates/adjusts a user to the given `PUID`/`PGID`, `chown`s the mounted data volume, then drops privileges (via `su-exec`/`gosu`) to run the app. This keeps file ownership on the Unraid array/cache correct instead of everything landing as root.                                                                               |
+| Access control         | None — the home network is the trust boundary. No login screen.                                                                                                                                                                                                                                                                                                                                                                                             |
+| Rate plans             | Time-of-day windows. A rate plan is either `flat` (single rate) or `peak-offpeak` (peak/off-peak rates + configurable time windows, e.g. off-peak 22:00–07:00). Session cost is computed by splitting session time across the applicable windows. Rate plans are versioned by effective date, since rates change over time.                                                                                                                                 |
+| Efficiency calc        | km/kWh per session = (odometer at this session − odometer at previous session) ÷ kWh added this session.                                                                                                                                                                                                                                                                                                                                                    |
+| App type               | Installable **PWA** from the start (manifest + service worker + icon set), not added on later.                                                                                                                                                                                                                                                                                                                                                              |
+| Branding               | A generated EV-charging-themed logo/icon set for the PWA, and a custom error page with a cartoon "crashed EV" illustration (see §5.7).                                                                                                                                                                                                                                                                                                                      |
 
 ## 4. Data model (Drizzle schema, SQLite)
 
@@ -100,15 +102,18 @@ stay correct.
 ## 5. Core features
 
 ### 5.1 Session logging
+
 - Form to add a home or public charging session (time, date, odometer, kWh, location).
 - Odometer validation: warn if lower than the last recorded odometer reading.
 - On save, session is auto-assigned to the billing period whose date range contains it (or left unassigned with a prompt to create one).
 
 ### 5.2 Rate plan management
+
 - CRUD for rate plans: flat or peak/off-peak, with effective-from date.
 - Peak/off-peak sessions split cost proportionally by minutes in each window.
 
 ### 5.3 Billing periods & report generation
+
 - CRUD for billing periods (start/end date, label).
 - Period detail view: home sessions, public sessions, computed totals/cost/%,
   matching the spreadsheet summary block.
@@ -116,12 +121,14 @@ stay correct.
   downloads a file ready to submit to the lease company.
 
 ### 5.4 Historical import
+
 - Upload a legacy monthly `.xlsx`.
 - Parser extracts header fields + both session tables.
 - Review screen: editable preview of parsed rows before committing.
 - Commit creates the billing period + sessions in one transaction.
 
 ### 5.5 Dashboard (personal use only, not part of the lease report)
+
 - km/kWh trend over time (line chart).
 - Home vs public charging split over time (stacked bar or area).
 - Cost per period trend.

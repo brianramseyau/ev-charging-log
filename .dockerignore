@@ -1,0 +1,12 @@
+node_modules
+.git
+.svelte-kit
+build
+data
+*.xlsx
+*.xls
+*.csv
+*.sqlite
+*.sqlite3
+*.db
+.env

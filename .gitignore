@@ -1,10 +1,26 @@
-# Dependencies
-node_modules/
+node_modules
 
-# Build output
-.svelte-kit/
-build/
-dist/
+# Output
+.output
+.vercel
+.netlify
+.wrangler
+/.svelte-kit
+/build
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Env
+.env
+.env.*
+!.env.example
+!.env.test
+
+# Vite
+vite.config.js.timestamp-*
+vite.config.ts.timestamp-*
 
 # Personal data — this repo is intended to go public eventually.
 # Never commit real spreadsheets, exports, or the live database:
@@ -17,11 +33,6 @@ dist/
 *.db
 data/
 
-# Env / secrets
-.env
-.env.*
-!.env.example
-
-# OS / editor
-.DS_Store
-*.log
+# Generated assets — rebuilt from src/theme and src/lib/assets via `npm run assets:generate`
+static/smui/
+static/icons/

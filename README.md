@@ -6,7 +6,7 @@ generating lease-company billing reports — replacing a manual spreadsheet
 workflow.
 
 Built for a single user / single vehicle. No accounts, no auth — designed to
-run on a home network.
+run on a home network (Unraid).
 
 See [PLAN.md](PLAN.md) for the full project plan, data model, and build phases.
 
@@ -19,6 +19,7 @@ See [PLAN.md](PLAN.md) for the full project plan, data model, and build phases.
 - Import historical spreadsheet data.
 - Personal dashboard: km/kWh efficiency trend, home vs public charging split,
   cost over time.
+- Installable PWA, mobile-first UI.
 
 ## Tech stack
 
@@ -27,11 +28,38 @@ See [PLAN.md](PLAN.md) for the full project plan, data model, and build phases.
 - **SQLite** via Drizzle ORM + `better-sqlite3`.
 - **exceljs** for spreadsheet import/export.
 - **Vitest** for testing calculation logic.
-- Deployed via **Docker** to a home NAS.
+- Deployed via **Docker** (PUID/PGID-aware) to a home Unraid server.
+
+## Developing
+
+Install dependencies with `npm install`, then start a dev server:
+
+```sh
+npm run dev
+
+# or start the server and open the app in a new browser tab
+npm run dev -- --open
+```
+
+Drizzle schema changes are pushed to the local SQLite file with:
+
+```sh
+npm run db:push
+```
+
+## Building
+
+To create a production version of the app:
+
+```sh
+npm run build
+```
+
+You can preview the production build with `npm run preview`.
 
 ## Status
 
-Early planning stage — see [PLAN.md](PLAN.md) for the build phases.
+Early build stage — see [PLAN.md](PLAN.md) for the build phases.
 
 ## A note on privacy
 
