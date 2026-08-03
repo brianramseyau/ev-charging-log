@@ -1,0 +1,27 @@
+# Dependencies
+node_modules/
+
+# Build output
+.svelte-kit/
+build/
+dist/
+
+# Personal data — this repo is intended to go public eventually.
+# Never commit real spreadsheets, exports, or the live database:
+# they contain name, vehicle rego, addresses, and charging history.
+*.xlsx
+*.xls
+*.csv
+*.sqlite
+*.sqlite3
+*.db
+data/
+
+# Env / secrets
+.env
+.env.*
+!.env.example
+
+# OS / editor
+.DS_Store
+*.log
