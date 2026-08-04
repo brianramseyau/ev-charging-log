@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
 	findBillingPeriodId,
 	isOdometerBelowLastRecorded,
+	isPeriodSubmitted,
 	mostRecentOdometer,
 	sortByDateTimeAsc,
 	sortByDateTimeDesc,
@@ -80,6 +81,23 @@ describe('findBillingPeriodId', () => {
 
 	it('returns null when no period matches', () => {
 		expect(findBillingPeriodId('2026-08-01', periods)).toBeNull();
+	});
+});
+
+describe('isPeriodSubmitted', () => {
+	it('is false when the period has never been submitted', () => {
+		expect(isPeriodSubmitted({ label: 'July 2026', submittedAt: null })).toBe(false);
+	});
+
+	it('is true once submittedAt is set', () => {
+		expect(isPeriodSubmitted({ label: 'July 2026', submittedAt: '2026-08-01T00:00:00.000Z' })).toBe(
+			true
+		);
+	});
+
+	it('is false when there is no matching period (session unassigned)', () => {
+		expect(isPeriodSubmitted(null)).toBe(false);
+		expect(isPeriodSubmitted(undefined)).toBe(false);
 	});
 });
 

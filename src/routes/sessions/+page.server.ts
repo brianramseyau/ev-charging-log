@@ -6,6 +6,7 @@ import { eq } from 'drizzle-orm';
 import {
 	findBillingPeriodId,
 	isOdometerBelowLastRecorded,
+	isPeriodSubmitted,
 	sortByDateTimeDesc,
 	withEfficiency
 } from '$lib/server/sessions';
@@ -92,6 +93,14 @@ export const actions: Actions = {
 		const periods = await db.select().from(billingPeriods);
 		const billingPeriodId = findBillingPeriodId(date, periods);
 
+		const matchedPeriod = periods.find((p) => p.id === billingPeriodId);
+		if (matchedPeriod && isPeriodSubmitted(matchedPeriod)) {
+			return fail(400, {
+				error: `"${matchedPeriod.label}" has already been submitted and can't accept new sessions. Unsubmit it first if you need to add one.`,
+				values
+			});
+		}
+
 		let cost: number | null = null;
 		let noRatePlan = false;
 		if (kind === 'home') {
@@ -130,6 +139,24 @@ export const actions: Actions = {
 		if (!id || Number.isNaN(id)) {
 			return fail(400, { error: 'Missing or invalid session id.' });
 		}
+
+		const [session] = await db.select().from(chargingSessions).where(eq(chargingSessions.id, id));
+		if (!session) {
+			return fail(400, { error: 'Session not found.' });
+		}
+
+		if (session.billingPeriodId != null) {
+			const [period] = await db
+				.select()
+				.from(billingPeriods)
+				.where(eq(billingPeriods.id, session.billingPeriodId));
+			if (isPeriodSubmitted(period)) {
+				return fail(400, {
+					error: `"${period.label}" has already been submitted and its sessions can't be deleted. Unsubmit it first if you need to remove one.`
+				});
+			}
+		}
+
 		await db.delete(chargingSessions).where(eq(chargingSessions.id, id));
 		return { deleted: true };
 	}

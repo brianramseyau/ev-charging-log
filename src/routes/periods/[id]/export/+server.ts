@@ -45,12 +45,6 @@ export const GET: RequestHandler = async ({ params }) => {
 
 	const filename = `${period.label.replace(/[^a-z0-9]+/gi, '-')}-home-charging-report.xlsx`;
 
-	// Mark the period as submitted once the report has actually been generated.
-	await db
-		.update(billingPeriods)
-		.set({ submittedAt: new Date().toISOString() })
-		.where(eq(billingPeriods.id, id));
-
 	return new Response(new Uint8Array(buffer), {
 		headers: {
 			'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',

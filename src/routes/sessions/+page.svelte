@@ -73,6 +73,10 @@
 
 <h1>Charging sessions</h1>
 
+{#if form?.error}
+	<p class="field-error page-error">{form.error}</p>
+{/if}
+
 <Card class="session-form-card" padded>
 	<Content>
 		<h2 class="section-title">Log a session</h2>
@@ -337,6 +341,10 @@
 		color: #b91c1c;
 		font-size: 0.8rem;
 		margin: 0.25rem 0 0;
+	}
+
+	.page-error {
+		margin: 0 0 1rem;
 	}
 
 	.save-feedback {

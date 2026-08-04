@@ -71,6 +71,12 @@
 	<p class="form-error">{form.error}</p>
 {/if}
 
+<form method="POST" action={data.period.submittedAt ? '?/unsubmit' : '?/submit'} use:enhance>
+	<Button variant="outlined" class="submit-toggle-button" style="width: 100%">
+		<Label>{data.period.submittedAt ? 'Unsubmit period' : 'Mark as submitted'}</Label>
+	</Button>
+</form>
+
 {#if isEmpty}
 	<form
 		method="POST"
@@ -251,6 +257,10 @@
 		width: 100%;
 		margin-bottom: 1.5rem;
 		color: #b91c1c !important;
+	}
+
+	:global(.submit-toggle-button) {
+		margin-bottom: 1.5rem;
 	}
 
 	.table-section {

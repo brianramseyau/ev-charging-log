@@ -19,6 +19,20 @@ export interface BillingPeriodRange {
 	endDate: string;
 }
 
+export interface SubmittableBillingPeriod {
+	label: string;
+	submittedAt: string | null;
+}
+
+/**
+ * True if a session belonging to this period should be blocked from being
+ * added or deleted. `null` means the session isn't assigned to any period
+ * (never blocked — nothing to have been submitted).
+ */
+export function isPeriodSubmitted(period: SubmittableBillingPeriod | null | undefined): boolean {
+	return period?.submittedAt != null;
+}
+
 /** Sorts sessions chronologically (ascending) by date then time. */
 export function sortByDateTimeAsc<T extends SessionDateTime>(rows: T[]): T[] {
 	return [...rows].sort((a, b) => (a.date + a.time).localeCompare(b.date + b.time));

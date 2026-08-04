@@ -40,6 +40,27 @@ export const load: PageServerLoad = async ({ params }) => {
 };
 
 export const actions: Actions = {
+	submit: async ({ params }) => {
+		const id = Number(params.id);
+		if (!Number.isInteger(id)) throw error(404, 'Billing period not found');
+
+		await db
+			.update(billingPeriods)
+			.set({ submittedAt: new Date().toISOString() })
+			.where(eq(billingPeriods.id, id));
+
+		return { success: true };
+	},
+
+	unsubmit: async ({ params }) => {
+		const id = Number(params.id);
+		if (!Number.isInteger(id)) throw error(404, 'Billing period not found');
+
+		await db.update(billingPeriods).set({ submittedAt: null }).where(eq(billingPeriods.id, id));
+
+		return { success: true };
+	},
+
 	delete: async ({ params }) => {
 		const id = Number(params.id);
 		if (!Number.isInteger(id)) throw error(404, 'Billing period not found');
