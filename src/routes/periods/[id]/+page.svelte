@@ -2,6 +2,14 @@
 	import { enhance } from '$app/forms';
 	import Button, { Label } from '@smui/button';
 	import Card from '@smui/card';
+	import {
+		mdiCalendarBlank,
+		mdiClockOutline,
+		mdiSpeedometer,
+		mdiLightningBolt,
+		mdiMapMarker
+	} from '@mdi/js';
+	import Icon from '$lib/components/Icon.svelte';
 	import type { ActionData, PageData } from './$types';
 
 	let { data, form }: { data: PageData; form: ActionData } = $props();
@@ -111,12 +119,28 @@
 			{#each data.homeSessions as s (s.id)}
 				<li class="session-row">
 					<div class="session-row__top">
-						<span class="session-row__datetime">{s.date} · {s.time}</span>
+						<span class="session-row__field">
+							<Icon path={mdiCalendarBlank} size={16} />
+							{s.date}
+						</span>
+						<span class="session-row__field">
+							<Icon path={mdiClockOutline} size={16} />
+							{s.time}
+						</span>
 					</div>
 					<div class="session-row__details">
-						<span>{s.odometerKm.toLocaleString()} km</span>
-						<span>{s.kwhUsed.toFixed(2)} kWh</span>
-						<span class="session-row__location">{s.location}</span>
+						<span class="session-row__field">
+							<Icon path={mdiSpeedometer} size={16} />
+							{s.odometerKm.toLocaleString()} km
+						</span>
+						<span class="session-row__field">
+							<Icon path={mdiLightningBolt} size={16} />
+							{s.kwhUsed.toFixed(2)} kWh
+						</span>
+						<span class="session-row__field session-row__location">
+							<Icon path={mdiMapMarker} size={16} />
+							{s.location}
+						</span>
 					</div>
 				</li>
 			{/each}
@@ -133,12 +157,28 @@
 			{#each data.publicSessions as s (s.id)}
 				<li class="session-row">
 					<div class="session-row__top">
-						<span class="session-row__datetime">{s.date} · {s.time}</span>
+						<span class="session-row__field">
+							<Icon path={mdiCalendarBlank} size={16} />
+							{s.date}
+						</span>
+						<span class="session-row__field">
+							<Icon path={mdiClockOutline} size={16} />
+							{s.time}
+						</span>
 					</div>
 					<div class="session-row__details">
-						<span>{s.odometerKm.toLocaleString()} km</span>
-						<span>{s.kwhUsed.toFixed(2)} kWh</span>
-						<span class="session-row__location">{s.location}</span>
+						<span class="session-row__field">
+							<Icon path={mdiSpeedometer} size={16} />
+							{s.odometerKm.toLocaleString()} km
+						</span>
+						<span class="session-row__field">
+							<Icon path={mdiLightningBolt} size={16} />
+							{s.kwhUsed.toFixed(2)} kWh
+						</span>
+						<span class="session-row__field session-row__location">
+							<Icon path={mdiMapMarker} size={16} />
+							{s.location}
+						</span>
 					</div>
 				</li>
 			{/each}
@@ -274,12 +314,21 @@
 	.session-row__top {
 		display: flex;
 		align-items: center;
-		gap: 0.6rem;
-	}
-
-	.session-row__datetime {
+		flex-wrap: wrap;
+		gap: 0.4rem 0.9rem;
 		font-weight: 600;
 		font-size: 0.9rem;
+	}
+
+	.session-row__field {
+		display: inline-flex;
+		align-items: center;
+		gap: 0.3rem;
+	}
+
+	.session-row__field :global(svg) {
+		flex-shrink: 0;
+		color: #64748b;
 	}
 
 	.session-row__details {
@@ -308,6 +357,10 @@
 
 		.session-row__details {
 			color: #cbd5e1;
+		}
+
+		.session-row__field :global(svg) {
+			color: #94a3b8;
 		}
 	}
 </style>

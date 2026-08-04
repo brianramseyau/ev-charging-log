@@ -5,7 +5,9 @@
 	import Card, { Content } from '@smui/card';
 	import IconButton from '@smui/icon-button';
 	import Textfield from '@smui/textfield';
+	import { mdiDeleteOutline } from '@mdi/js';
 	import DateTimeField from '$lib/components/DateTimeField.svelte';
+	import Icon from '$lib/components/Icon.svelte';
 	import type { ActionData, PageData } from './$types';
 
 	let { data, form }: { data: PageData; form: ActionData } = $props();
@@ -232,16 +234,7 @@
 						<form method="POST" action="?/delete" use:enhance class="delete-form">
 							<input type="hidden" name="id" value={session.id} />
 							<IconButton type="submit" aria-label="Delete session" title="Delete session">
-								<svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
-									<path
-										fill="none"
-										stroke="currentColor"
-										stroke-width="2"
-										stroke-linecap="round"
-										stroke-linejoin="round"
-										d="M4 7h16M9 4h6M8 7l1 13a2 2 0 0 0 2 2h2a2 2 0 0 0 2-2l1-13"
-									/>
-								</svg>
+								<Icon path={mdiDeleteOutline} size={20} />
 							</IconButton>
 						</form>
 					{/if}

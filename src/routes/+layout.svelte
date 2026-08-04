@@ -1,7 +1,16 @@
 <script lang="ts">
 	import { page } from '$app/state';
 	import { browser } from '$app/environment';
+	import {
+		mdiViewDashboard,
+		mdiLightningBolt,
+		mdiCalendarRange,
+		mdiTune,
+		mdiTrayArrowUp,
+		mdiCog
+	} from '@mdi/js';
 	import logo from '$lib/assets/logo.svg';
+	import Icon from '$lib/components/Icon.svelte';
 
 	let { children } = $props();
 
@@ -10,31 +19,11 @@
 	}
 
 	const navItems = [
-		{
-			href: '/',
-			label: 'Dashboard',
-			icon: 'M4 13h7V4H4v9zm0 7h7v-5H4v5zm9 0h7V11h-7v9zm0-16v5h7V4h-7z'
-		},
-		{
-			href: '/sessions',
-			label: 'Sessions',
-			icon: 'M13 2L3 14h7l-1 8 10-12h-7l1-8z'
-		},
-		{
-			href: '/periods',
-			label: 'Periods',
-			icon: 'M7 2v2H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2h-2V2h-2v2H9V2H7zM5 9h14v11H5V9z'
-		},
-		{
-			href: '/rates',
-			label: 'Rates',
-			icon: 'M9.5 6a3.5 3.5 0 1 0 0 7 3.5 3.5 0 0 0 0-7zM3 19l16-16h2L5 21H3v-2z'
-		},
-		{
-			href: '/import',
-			label: 'Import',
-			icon: 'M5 20h14v-2H5v2zM12 2 6 9h4v6h4V9h4l-6-7z'
-		}
+		{ href: '/', label: 'Dashboard', icon: mdiViewDashboard },
+		{ href: '/sessions', label: 'Sessions', icon: mdiLightningBolt },
+		{ href: '/periods', label: 'Periods', icon: mdiCalendarRange },
+		{ href: '/rates', label: 'Rates', icon: mdiTune },
+		{ href: '/import', label: 'Import', icon: mdiTrayArrowUp }
 	];
 
 	function isActive(href: string) {
@@ -47,12 +36,7 @@
 		<img src={logo} alt="" class="app-bar__logo" width="28" height="28" />
 		<span class="app-bar__title">EV Charging Log</span>
 		<a href="/settings" class="app-bar__settings" aria-label="Settings">
-			<svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true">
-				<path
-					fill="currentColor"
-					d="M19.14 12.94a7.14 7.14 0 0 0 .06-.94 7.14 7.14 0 0 0-.06-.94l2.03-1.58a.5.5 0 0 0 .12-.64l-1.92-3.32a.5.5 0 0 0-.6-.22l-2.39.96a7.1 7.1 0 0 0-1.63-.94l-.36-2.54a.5.5 0 0 0-.5-.42h-3.84a.5.5 0 0 0-.5.42l-.36 2.54a7.1 7.1 0 0 0-1.63.94l-2.39-.96a.5.5 0 0 0-.6.22L2.7 8.84a.5.5 0 0 0 .12.64l2.03 1.58a7.14 7.14 0 0 0 0 1.88L2.82 14.5a.5.5 0 0 0-.12.64l1.92 3.32a.5.5 0 0 0 .6.22l2.39-.96c.5.4 1.04.72 1.63.94l.36 2.54a.5.5 0 0 0 .5.42h3.84a.5.5 0 0 0 .5-.42l.36-2.54c.59-.22 1.13-.54 1.63-.94l2.39.96a.5.5 0 0 0 .6-.22l1.92-3.32a.5.5 0 0 0-.12-.64l-2.03-1.56ZM12 15.5a3.5 3.5 0 1 1 0-7 3.5 3.5 0 0 1 0 7Z"
-				/>
-			</svg>
+			<Icon path={mdiCog} size={22} />
 		</a>
 	</header>
 
@@ -63,9 +47,7 @@
 	<nav class="bottom-nav" aria-label="Primary">
 		{#each navItems as item (item.href)}
 			<a href={item.href} class="bottom-nav__item" class:is-active={isActive(item.href)}>
-				<svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true">
-					<path d={item.icon} fill="currentColor" />
-				</svg>
+				<Icon path={item.icon} size={22} />
 				<span>{item.label}</span>
 			</a>
 		{/each}

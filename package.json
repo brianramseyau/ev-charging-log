@@ -51,6 +51,7 @@
 		"vitest": "^4.1.8"
 	},
 	"dependencies": {
+		"@mdi/js": "^7.4.47",
 		"@smui/button": "^9.0.1",
 		"@smui/card": "^9.0.1",
 		"@smui/common": "^9.0.1",
