@@ -46,3 +46,4 @@ data/
 # Generated assets — rebuilt from src/theme and src/lib/assets via `npm run assets:generate`
 static/smui/
 static/icons/
+electron/resources/

@@ -8,6 +8,10 @@ import sharp from 'sharp';
 const root = dirname(dirname(fileURLToPath(import.meta.url)));
 const logoPath = join(root, 'src/lib/assets/logo.svg');
 const outDir = join(root, 'static/icons');
+// Separate from adapter-node's `build/` output dir, which electron-builder's
+// default `directories.buildResources` ("build") would otherwise collide
+// with — see the `buildResources` override in package.json's `build` config.
+const electronOutDir = join(root, 'electron/resources');
 
 const sizes = [
 	{ name: 'favicon-32.png', size: 32 },
@@ -17,14 +21,17 @@ const sizes = [
 	// Maskable icons keep the logo inside the ~80% "safe zone" that platforms
 	// may crop to a circle/squircle, so pad the artwork instead of filling the canvas.
 	{ name: 'icon-maskable-192.png', size: 192, maskable: true },
-	{ name: 'icon-maskable-512.png', size: 512, maskable: true }
+	{ name: 'icon-maskable-512.png', size: 512, maskable: true },
+	// 1024px source electron-builder rasterizes into .icns/.ico/Linux PNG set.
+	{ name: 'icon.png', size: 1024, outDir: electronOutDir }
 ];
 
 async function main() {
 	await mkdir(outDir, { recursive: true });
+	await mkdir(electronOutDir, { recursive: true });
 	const svg = await readFile(logoPath);
 
-	for (const { name, size, maskable } of sizes) {
+	for (const { name, size, maskable, outDir: targetDir = outDir } of sizes) {
 		const image = maskable
 			? sharp(svg)
 					.resize(Math.round(size * 0.8), Math.round(size * 0.8))
@@ -37,8 +44,9 @@ async function main() {
 					})
 			: sharp(svg).resize(size, size);
 
-		await image.png().toFile(join(outDir, name));
-		console.log(`wrote static/icons/${name}`);
+		const dest = join(targetDir, name);
+		await image.png().toFile(dest);
+		console.log(`wrote ${dest.replace(root + '/', '')}`);
 	}
 }
 

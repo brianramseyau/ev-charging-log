@@ -85,7 +85,8 @@
 		"appId": "com.brianramsey.ev-charging-log",
 		"productName": "EV Charging Log",
 		"directories": {
-			"output": "release"
+			"output": "release",
+			"buildResources": "electron/resources"
 		},
 		"files": [
 			"build/**/*",
@@ -96,6 +97,7 @@
 			"node_modules/**/*"
 		],
 		"mac": {
+			"icon": "electron/resources/icon.png",
 			"target": [
 				{
 					"target": "dmg",
@@ -116,6 +118,7 @@
 			"identity": null
 		},
 		"win": {
+			"icon": "electron/resources/icon.png",
 			"target": [
 				{
 					"target": "nsis",
@@ -126,6 +129,7 @@
 			]
 		},
 		"linux": {
+			"icon": "electron/resources/icon.png",
 			"target": [
 				{
 					"target": "AppImage",

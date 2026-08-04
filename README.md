@@ -121,6 +121,11 @@ since native module rebuilds (`better-sqlite3`) need to happen on the real
 target platform. No code signing/notarization for any of them (see
 PLAN.md §11.5).
 
+App name and icon (window/Dock/taskbar, and packaged `.icns`/`.ico`) come
+from the same source logo as the PWA icons (`src/lib/assets/logo.svg`),
+rasterized to `electron/resources/icon.png` by `npm run icons:generate`
+(part of `npm install`'s `prepare` step) — not Electron's defaults.
+
 Packaged builds check GitHub Releases for a newer version on launch and
 prompt to download/install it (via `electron-updater`, reading the same
 `publish` config used to publish releases) — nothing to configure, it's a

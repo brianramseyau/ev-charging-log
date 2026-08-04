@@ -12,6 +12,11 @@ let serverProcess = null;
 let mainWindow = null;
 let serverPort = null;
 
+// Packaged builds get this from productName/Info.plist automatically, but
+// `electron .` (electron:dev) falls back to package.json's npm `name`
+// ("ev-charging-log") for the dock/menu-bar name unless set explicitly.
+app.setName('EV Charging Log');
+
 // Defaults to a per-app-data SQLite file (separate from any Docker deployment).
 // To point this build at an existing database instead — e.g. a Docker
 // deployment's file shared over a network mount — create
@@ -101,7 +106,11 @@ function createWindow(port) {
 	mainWindow = new BrowserWindow({
 		width: 1280,
 		height: 800,
-		title: 'EV Charging Log'
+		title: 'EV Charging Log',
+		// Packaged builds already get this from icon.icns/.ico via
+		// electron-builder; set explicitly too so `electron:dev` (unpackaged,
+		// no bundle icon) shows the real icon instead of Electron's default.
+		icon: path.join(__dirname, 'resources', 'icon.png')
 	});
 	mainWindow.loadURL(`http://127.0.0.1:${port}`);
 	mainWindow.on('closed', () => {
@@ -110,6 +119,13 @@ function createWindow(port) {
 }
 
 app.whenReady().then(async () => {
+	// On macOS, BrowserWindow's `icon` option doesn't affect the Dock icon —
+	// only relevant in dev, since packaged builds already get it from the
+	// .icns/Info.plist.
+	if (process.platform === 'darwin' && !app.isPackaged && app.dock) {
+		app.dock.setIcon(path.join(__dirname, 'resources', 'icon.png'));
+	}
+
 	serverPort = await startServer();
 	createWindow(serverPort);
 
