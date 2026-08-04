@@ -19,7 +19,7 @@
 	let time = $state('');
 	let odometerKm = $state('');
 	let kwhUsed = $state('');
-	let location = $state(data.homeAddress ?? '');
+	let location = $state(untrack(() => data.homeAddress) ?? '');
 	let notes = $state('');
 
 	let submitting = $state(false);
