@@ -5,7 +5,7 @@
 	import Card, { Content } from '@smui/card';
 	import IconButton from '@smui/icon-button';
 	import Textfield from '@smui/textfield';
-	import { mdiDeleteOutline } from '@mdi/js';
+	import { mdiDeleteOutline, mdiHome, mdiEvStation } from '@mdi/js';
 	import DateTimeField from '$lib/components/DateTimeField.svelte';
 	import Icon from '$lib/components/Icon.svelte';
 	import type { ActionData, PageData } from './$types';
@@ -116,10 +116,12 @@
 				<div class="kind-toggle" role="radiogroup" aria-label="Charging kind">
 					<label class:selected={kind === 'home'} class="kind-toggle__home">
 						<input type="radio" name="kind" value="home" bind:group={kind} />
+						<Icon path={mdiHome} size={18} />
 						Home
 					</label>
 					<label class:selected={kind === 'public'} class="kind-toggle__public">
 						<input type="radio" name="kind" value="public" bind:group={kind} />
+						<Icon path={mdiEvStation} size={18} />
 						Public
 					</label>
 				</div>
