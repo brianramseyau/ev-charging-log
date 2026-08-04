@@ -1,8 +1,13 @@
 <script lang="ts">
 	import { page } from '$app/state';
+	import { browser } from '$app/environment';
 	import logo from '$lib/assets/logo.svg';
 
 	let { children } = $props();
+
+	if (browser) {
+		import('virtual:pwa-register/svelte').then(({ useRegisterSW }) => useRegisterSW());
+	}
 
 	const navItems = [
 		{
