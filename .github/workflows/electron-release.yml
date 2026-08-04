@@ -34,3 +34,8 @@ jobs:
         run: npm run electron:build -- --publish always
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # SvelteKit's postbuild step imports hooks.server.ts (which opens the db
+          # connection) to analyse the route graph, so it needs *some* writable
+          # DATABASE_URL even though this build-time database is discarded — the
+          # real path is set at runtime in electron/main.cjs.
+          DATABASE_URL: ${{ runner.temp }}/build-time.db
