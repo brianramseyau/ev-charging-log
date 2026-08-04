@@ -142,7 +142,8 @@
 			"category": "Utility"
 		},
 		"publish": {
-			"provider": "github"
+			"provider": "github",
+			"releaseType": "release"
 		}
 	}
 }
