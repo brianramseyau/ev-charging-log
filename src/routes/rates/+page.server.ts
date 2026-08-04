@@ -29,9 +29,9 @@ async function recalculateAndPersistCosts(): Promise<number> {
 		db.select().from(ratePlans)
 	]);
 
-	// Drafts have no kWh yet, so there's nothing to price until they're completed.
+	// Drafts (kwhUsed not yet recorded) have nothing to price until completed.
 	const completedHomeSessions = homeSessions
-		.filter((s) => !s.isDraft && s.kwhUsed != null)
+		.filter((s) => s.kwhUsed != null)
 		.map((s) => ({ ...s, kwhUsed: s.kwhUsed as number }));
 
 	const updates = recalculateSessionCosts(completedHomeSessions, plans);

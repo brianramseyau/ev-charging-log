@@ -31,10 +31,10 @@ export const GET: RequestHandler = async ({ params }) => {
 
 	const [settingsRow] = await db.select().from(settings).limit(1);
 
-	// Drafts have no kWh/cost yet; ?/submit already blocks submitting a period
-	// while any remain, but exclude them here too in case the export link is
-	// hit directly on an unsubmitted period.
-	const completedSessions = sessions.filter((s) => !s.isDraft);
+	// Drafts (kwhUsed not yet recorded) have no cost yet; ?/submit already
+	// blocks submitting a period while any remain, but exclude them here too
+	// in case the export link is hit directly on an unsubmitted period.
+	const completedSessions = sessions.filter((s) => s.kwhUsed != null);
 	const homeSessions = completedSessions.filter((s) => s.kind === 'home').map(toReportSession);
 	const publicSessions = completedSessions.filter((s) => s.kind === 'public').map(toReportSession);
 

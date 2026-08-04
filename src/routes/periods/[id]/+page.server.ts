@@ -18,12 +18,12 @@ export const load: PageServerLoad = async ({ params }) => {
 		.where(eq(chargingSessions.billingPeriodId, id))
 		.orderBy(asc(chargingSessions.date), asc(chargingSessions.time));
 
-	// Drafts (kWh not yet recorded) are shown separately and left out of the
+	// Drafts (kwhUsed not yet recorded) are shown separately and left out of the
 	// report totals, since there's nothing to sum yet. Completed sessions always
 	// have kwhUsed set, so it's safe to default the type down to non-null here.
-	const draftSessions = sessions.filter((s) => s.isDraft);
+	const draftSessions = sessions.filter((s) => s.kwhUsed == null);
 	const completedSessions = sessions
-		.filter((s) => !s.isDraft)
+		.filter((s) => s.kwhUsed != null)
 		.map((s) => ({ ...s, kwhUsed: s.kwhUsed ?? 0 }));
 	const homeSessions = completedSessions.filter((s) => s.kind === 'home');
 	const publicSessions = completedSessions.filter((s) => s.kind === 'public');
@@ -56,7 +56,7 @@ export const actions: Actions = {
 		const sessions = await db
 			.select({
 				billingPeriodId: chargingSessions.billingPeriodId,
-				isDraft: chargingSessions.isDraft
+				kwhUsed: chargingSessions.kwhUsed
 			})
 			.from(chargingSessions)
 			.where(eq(chargingSessions.billingPeriodId, id));

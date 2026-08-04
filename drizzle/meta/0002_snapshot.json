@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "7c41262e-9876-4953-adfb-4e02d20512a0",
+  "id": "1cdce1c7-4697-4e99-82eb-cedea0f7497a",
   "prevId": "6c00bc67-95b1-4a1e-a26b-4fab52589645",
   "tables": {
     "billing_periods": {
@@ -121,14 +121,6 @@
           "primaryKey": false,
           "notNull": false,
           "autoincrement": false
-        },
-        "is_draft": {
-          "name": "is_draft",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false,
-          "default": false
         }
       },
       "indexes": {},

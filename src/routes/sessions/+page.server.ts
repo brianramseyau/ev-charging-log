@@ -41,7 +41,6 @@ type FormValues = {
 	kwhUsed: string | null;
 	location: string | null;
 	notes: string | null;
-	isDraft: string | null;
 };
 
 function readForm(form: FormData): FormValues {
@@ -52,8 +51,7 @@ function readForm(form: FormData): FormValues {
 		odometerKm: form.get('odometerKm')?.toString() ?? null,
 		kwhUsed: form.get('kwhUsed')?.toString() ?? null,
 		location: form.get('location')?.toString() ?? null,
-		notes: form.get('notes')?.toString() ?? null,
-		isDraft: form.get('isDraft')?.toString() ?? null
+		notes: form.get('notes')?.toString() ?? null
 	};
 }
 
@@ -61,7 +59,6 @@ export const actions: Actions = {
 	create: async ({ request }) => {
 		const values = readForm(await request.formData());
 		const errors: Partial<Record<keyof FormValues, string>> = {};
-		const isDraft = values.isDraft === 'true';
 
 		if (values.kind !== 'home' && values.kind !== 'public') {
 			errors.kind = 'Choose home or public.';
@@ -74,11 +71,17 @@ export const actions: Actions = {
 			errors.odometerKm = 'Enter a valid odometer reading (km).';
 		}
 
-		// A draft records what's known when plugging in — kWh isn't known until
-		// charging finishes, so it's only required for a normal (non-draft) session.
-		const kwhUsed = values.kwhUsed ? Number(values.kwhUsed) : NaN;
-		if (!isDraft && (!values.kwhUsed || Number.isNaN(kwhUsed) || kwhUsed <= 0)) {
-			errors.kwhUsed = 'Enter kWh used, greater than 0.';
+		// kWh is optional: leaving it blank saves the session as a draft (just the
+		// bits known when plugging in — date/time/odometer/location), to be
+		// completed with kWh once charging finishes. If something was typed, though,
+		// it has to be a valid amount.
+		const kwhRaw = values.kwhUsed?.trim();
+		let kwhUsed: number | null = null;
+		if (kwhRaw) {
+			kwhUsed = Number(kwhRaw);
+			if (Number.isNaN(kwhUsed) || kwhUsed <= 0) {
+				errors.kwhUsed = 'Enter kWh used, greater than 0, or leave blank to save as a draft.';
+			}
 		}
 
 		const location = values.location?.trim();
@@ -110,7 +113,7 @@ export const actions: Actions = {
 
 		let cost: number | null = null;
 		let noRatePlan = false;
-		if (!isDraft && kind === 'home') {
+		if (kwhUsed != null && kind === 'home') {
 			const plans = await db.select().from(ratePlans);
 			const plan = resolveRatePlan(date, plans);
 			if (plan) {
@@ -126,16 +129,15 @@ export const actions: Actions = {
 			date,
 			time,
 			odometerKm,
-			kwhUsed: isDraft ? null : kwhUsed,
+			kwhUsed,
 			location: validatedLocation,
 			cost,
-			notes,
-			isDraft
+			notes
 		});
 
 		return {
 			success: true,
-			isDraft,
+			isDraft: kwhUsed == null,
 			odometerWarning,
 			unassigned: billingPeriodId == null,
 			noRatePlan
@@ -153,7 +155,7 @@ export const actions: Actions = {
 		if (!session) {
 			return fail(400, { completeError: 'Session not found.', completeId: id });
 		}
-		if (!session.isDraft) {
+		if (session.kwhUsed != null) {
 			return fail(400, { completeError: 'Session is already complete.', completeId: id });
 		}
 
@@ -191,10 +193,7 @@ export const actions: Actions = {
 			}
 		}
 
-		await db
-			.update(chargingSessions)
-			.set({ kwhUsed, cost, isDraft: false })
-			.where(eq(chargingSessions.id, id));
+		await db.update(chargingSessions).set({ kwhUsed, cost }).where(eq(chargingSessions.id, id));
 
 		return { completed: true, completedId: id, noRatePlan };
 	},

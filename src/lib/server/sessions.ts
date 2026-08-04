@@ -100,12 +100,12 @@ export function withEfficiency<T extends SessionRow>(
 
 /**
  * True if any session in `sessions` belonging to billing period `periodId`
- * is still a draft (kWh not yet recorded). Used to block submitting a period
- * whose report would otherwise silently omit that session's kWh/cost.
+ * is still a draft (kWh not yet recorded — see SessionRow.kwhUsed). Used to
+ * block submitting a period whose report would otherwise silently omit that
+ * session's kWh/cost.
  */
-export function hasUnresolvedDrafts<T extends { billingPeriodId: number | null; isDraft: boolean }>(
-	periodId: number,
-	sessions: T[]
-): boolean {
-	return sessions.some((s) => s.billingPeriodId === periodId && s.isDraft);
+export function hasUnresolvedDrafts<
+	T extends { billingPeriodId: number | null; kwhUsed: number | null }
+>(periodId: number, sessions: T[]): boolean {
+	return sessions.some((s) => s.billingPeriodId === periodId && s.kwhUsed == null);
 }

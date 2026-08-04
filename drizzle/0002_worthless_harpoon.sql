@@ -10,7 +10,6 @@ CREATE TABLE `__new_charging_sessions` (
 	`location` text NOT NULL,
 	`cost` real,
 	`notes` text,
-	`is_draft` integer DEFAULT false NOT NULL,
 	FOREIGN KEY (`billing_period_id`) REFERENCES `billing_periods`(`id`) ON UPDATE no action ON DELETE no action
 );
 --> statement-breakpoint

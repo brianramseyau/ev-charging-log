@@ -24,9 +24,12 @@
 	let kwhUsed = $state('');
 	let location = $state(untrack(() => data.homeAddress) ?? '');
 	let notes = $state('');
-	// Drafts skip kWh — it's not known until charging finishes, which is the
-	// whole point: log date/time/odometer/location on the spot, before driving off.
-	let isDraft = $state(false);
+
+	// kWh is optional: leaving it blank saves the session as a draft (just the bits
+	// known when plugging in), to be completed once charging finishes and kWh is known.
+	// SMUI's number Textfield can hand back either a string or a number, so check
+	// loosely rather than assuming .trim() exists.
+	const willBeDraft = $derived(!kwhUsed);
 
 	let submitting = $state(false);
 	let completingId = $state<number | null>(null);
@@ -54,7 +57,6 @@
 			kwhUsed = form.values.kwhUsed ?? '';
 			location = form.values.location ?? '';
 			notes = form.values.notes ?? '';
-			isDraft = form.values.isDraft === 'true';
 		}
 	});
 
@@ -66,7 +68,6 @@
 		kwhUsed = '';
 		location = homeAddress;
 		notes = '';
-		isDraft = false;
 	}
 
 	const errors = $derived(form?.errors ?? {});
@@ -125,13 +126,6 @@
 				{#if errors.kind}<p class="field-error">{errors.kind}</p>{/if}
 			</div>
 
-			<div class="field-group">
-				<label class="draft-checkbox">
-					<input type="checkbox" name="isDraft" value="true" bind:checked={isDraft} />
-					Just plugged in — save as draft, add kWh later
-				</label>
-			</div>
-
 			<div class="field-row">
 				<DateTimeField
 					type="date"
@@ -170,23 +164,26 @@
 				{#if errors.odometerKm}<p class="field-error">{errors.odometerKm}</p>{/if}
 			</div>
 
-			{#if !isDraft}
-				<div class="field-row">
-					<Textfield
-						variant="outlined"
-						type="number"
-						label="kWh used"
-						bind:value={kwhUsed}
-						input$name="kwhUsed"
-						input$step="0.01"
-						input$min="0"
-						required
-						style="width: 100%"
-						invalid={!!errors.kwhUsed}
-					/>
-					{#if errors.kwhUsed}<p class="field-error">{errors.kwhUsed}</p>{/if}
-				</div>
-			{/if}
+			<div class="field-row">
+				<Textfield
+					variant="outlined"
+					type="number"
+					label="kWh used (optional)"
+					bind:value={kwhUsed}
+					input$name="kwhUsed"
+					input$step="0.01"
+					input$min="0"
+					style="width: 100%"
+					invalid={!!errors.kwhUsed}
+				/>
+				{#if errors.kwhUsed}
+					<p class="field-error">{errors.kwhUsed}</p>
+				{:else}
+					<p class="field-hint">
+						Leave blank to save as a draft — you can fill this in once charging finishes.
+					</p>
+				{/if}
+			</div>
 
 			<div class="field-row">
 				<Textfield
@@ -213,7 +210,7 @@
 			</div>
 
 			<Button variant="raised" type="submit" disabled={submitting} style="width: 100%">
-				<Label>{submitting ? 'Saving…' : isDraft ? 'Save draft' : 'Save session'}</Label>
+				<Label>{submitting ? 'Saving…' : willBeDraft ? 'Save draft' : 'Save session'}</Label>
 			</Button>
 
 			{#if form?.success}
@@ -247,12 +244,12 @@
 {:else}
 	<ul class="session-list">
 		{#each visibleSessions as session (session.id)}
-			<li class="session-row" class:session-row--draft={session.isDraft}>
+			<li class="session-row" class:session-row--draft={session.kwhUsed == null}>
 				<div class="session-row__top">
 					<span class="badge" class:badge--home={session.kind === 'home'}>
 						{session.kind === 'home' ? 'Home' : 'Public'}
 					</span>
-					{#if session.isDraft}
+					{#if session.kwhUsed == null}
 						<span class="badge badge--draft">Draft</span>
 					{/if}
 					<span class="session-row__datetime">{session.date} · {session.time}</span>
@@ -290,7 +287,7 @@
 				{#if session.notes}
 					<p class="session-row__notes">{session.notes}</p>
 				{/if}
-				{#if session.isDraft && !session.periodSubmitted}
+				{#if session.kwhUsed == null && !session.periodSubmitted}
 					<form
 						method="POST"
 						action="?/complete"
@@ -397,19 +394,14 @@
 		margin: 0;
 	}
 
-	.draft-checkbox {
-		display: flex;
-		align-items: center;
-		gap: 0.5rem;
-		font-size: 0.9rem;
-	}
-
-	.draft-checkbox input {
-		margin: 0;
-	}
-
 	.field-error {
 		color: #b91c1c;
+		font-size: 0.8rem;
+		margin: 0.25rem 0 0;
+	}
+
+	.field-hint {
+		color: #64748b;
 		font-size: 0.8rem;
 		margin: 0.25rem 0 0;
 	}
@@ -564,6 +556,10 @@
 
 	@media (prefers-color-scheme: dark) {
 		.field-label {
+			color: #94a3b8;
+		}
+
+		.field-hint {
 			color: #94a3b8;
 		}
 

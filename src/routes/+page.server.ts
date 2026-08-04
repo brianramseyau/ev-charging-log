@@ -19,10 +19,10 @@ export const load: PageServerLoad = async () => {
 		db.select().from(billingPeriods)
 	]);
 
-	// Drafts have no kWh/cost yet, so they're excluded until completed rather
+	// Drafts (kwhUsed not yet recorded) are excluded until completed rather
 	// than skewing efficiency, cost, and split figures with incomplete data.
 	const sessions: DashboardSession[] = sessionRows
-		.filter((row) => !row.isDraft)
+		.filter((row) => row.kwhUsed != null)
 		.map((row) => ({
 			id: row.id,
 			kind: row.kind,

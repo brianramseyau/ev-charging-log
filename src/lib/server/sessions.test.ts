@@ -138,18 +138,18 @@ describe('withEfficiency', () => {
 });
 
 describe('hasUnresolvedDrafts', () => {
-	it('is true when a draft session belongs to the period', () => {
+	it('is true when a session with no kWh recorded belongs to the period', () => {
 		const sessions = [
-			{ billingPeriodId: 1, isDraft: true },
-			{ billingPeriodId: 2, isDraft: false }
+			{ billingPeriodId: 1, kwhUsed: null },
+			{ billingPeriodId: 2, kwhUsed: 10 }
 		];
 		expect(hasUnresolvedDrafts(1, sessions)).toBe(true);
 	});
 
-	it('is false when the period has no draft sessions', () => {
+	it('is false when every session in the period has kWh recorded', () => {
 		const sessions = [
-			{ billingPeriodId: 1, isDraft: false },
-			{ billingPeriodId: 2, isDraft: true }
+			{ billingPeriodId: 1, kwhUsed: 10 },
+			{ billingPeriodId: 2, kwhUsed: null }
 		];
 		expect(hasUnresolvedDrafts(1, sessions)).toBe(false);
 	});
