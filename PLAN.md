@@ -219,3 +219,10 @@ ev-charging-log/
 - Decide whether "public charging" sessions need their own cost tracking, or just kWh (since they're already claimed elsewhere and don't affect what you submit).
 - **Export template file**: the real `Record of Home Charging July 2026.xlsx` contains personal data (name, rego, home address) and is gitignored — it must never be committed. Before phase 3, create a **sanitized version** of the template (same layout/formatting, placeholder values) to check into `static/templates/` so the export feature has something to build/test against in the repo.
 - Confirm target Unraid PUID/PGID values (typically `99`/`100` for the default Unraid `nobody`/`users`, but check your setup) when writing the template defaults.
+
+## Ongoing: Enhancements
+
+[x] Enhancement: Home address is almost always the same, in the settings (/settings) allow a user to add their home address. This should then pre-populate the home address into the Location field in sessions (/sessions)
+[x] Fix: Let's set a common theme for the charging type colours, anywhere that Home is coloured it should be Blue (#3987e5), and anywhere Public is shown with colour it should be orange (#d95926). These colours are taken from the dashboard area. i'd like them used on other places such as the type chips used in the sessions history area also.
+[x] Fix: the app currently has US$ where some money is concerned. Remove any currency related prefixes like this, the only currency symbol/detail should be $ (dollar sign).
+[x] Fix: if there is no rate present before adding sessions, no cost is recorded against sessions, and can never be added after due to no edit facility. If a rate is added/changed for a time period, this should update all sessions covered by it. This will also allow if prices change from a given month and sessions exist, it can be updated retrospectively.
