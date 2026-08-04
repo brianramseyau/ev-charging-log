@@ -43,7 +43,7 @@
 		border: 1px solid #cbd5e1;
 		border-radius: 6px;
 		font-family: inherit;
-		background: #fff;
+		background: transparent;
 		color-scheme: light;
 	}
 
@@ -63,8 +63,8 @@
 		}
 
 		.date-time-field input {
-			background: #1e293b;
-			border-color: rgba(255, 255, 255, 0.2);
+			background: transparent;
+			border-color: rgba(255, 255, 255, 0.38);
 			color: #e2e8f0;
 			color-scheme: dark;
 		}
