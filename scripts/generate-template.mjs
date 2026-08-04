@@ -38,7 +38,7 @@ sheet.columns = [
 	{ key: 'B', width: 16 },
 	{ key: 'C', width: 14 },
 	{ key: 'D', width: 16 },
-	{ key: 'E', width: 26 }
+	{ key: 'E', width: 40 }
 ];
 
 function labelCell(cell, value) {
@@ -82,10 +82,13 @@ function dataRow(rowNumber, time, date, odometer, kwh, location) {
 		const cell = row.getCell(i + 1);
 		cell.value = v;
 		cell.border = THIN_BORDER;
+		cell.alignment = { vertical: 'middle' };
 		if (i === 1) cell.numFmt = 'yyyy-mm-dd';
 		if (i === 2) cell.numFmt = '#,##0.0';
 		if (i === 3) cell.numFmt = '0.00';
+		if (i === 4) cell.alignment = { vertical: 'middle', wrapText: true };
 	});
+	row.height = 30;
 }
 
 function totalRow(rowNumber, label, formula, numFmt) {
@@ -117,8 +120,10 @@ valueCell(sheet.getCell('E3'), new Date('2026-07-31'), 'yyyy-mm-dd');
 labelCell(sheet.getCell('A4'), 'Claiming kW/h:');
 sheet.getCell('B4').value = { formula: 'D11' };
 sheet.getCell('B4').numFmt = '#,##0.00';
+sheet.getCell('B4').alignment = { horizontal: 'left' };
 labelCell(sheet.getCell('D4'), 'Rate kW/h:');
 valueCell(sheet.getCell('E4'), 0.3, '$#,##0.00000');
+sheet.getCell('E4').alignment = { horizontal: 'left' };
 
 // --- Home charging table ---
 titleRow(6, 'Home Charging');
