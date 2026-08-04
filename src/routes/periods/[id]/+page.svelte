@@ -126,7 +126,7 @@
 							<Cell>{s.time}</Cell>
 							<Cell numeric>{s.odometerKm.toLocaleString()}</Cell>
 							<Cell numeric>{s.kwhUsed.toFixed(2)}</Cell>
-							<Cell>{s.location}</Cell>
+							<Cell class="location-cell">{s.location}</Cell>
 						</Row>
 					{/each}
 				</Body>
@@ -158,7 +158,7 @@
 							<Cell>{s.time}</Cell>
 							<Cell numeric>{s.odometerKm.toLocaleString()}</Cell>
 							<Cell numeric>{s.kwhUsed.toFixed(2)}</Cell>
-							<Cell>{s.location}</Cell>
+							<Cell class="location-cell">{s.location}</Cell>
 						</Row>
 					{/each}
 				</Body>
@@ -274,6 +274,11 @@
 
 	.table-scroll {
 		overflow-x: auto;
+	}
+
+	:global(.location-cell) {
+		white-space: normal !important;
+		word-break: break-word;
 	}
 
 	.empty {
