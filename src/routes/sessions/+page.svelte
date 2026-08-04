@@ -5,7 +5,8 @@
 	import Card, { Content } from '@smui/card';
 	import IconButton from '@smui/icon-button';
 	import Textfield from '@smui/textfield';
-	import { mdiDeleteOutline, mdiHome, mdiEvStation } from '@mdi/js';
+	import TextfieldIcon from '@smui/textfield/icon';
+	import { mdiClose, mdiDeleteOutline, mdiHome, mdiEvStation } from '@mdi/js';
 	import DateTimeField from '$lib/components/DateTimeField.svelte';
 	import Icon from '$lib/components/Icon.svelte';
 	import type { ActionData, PageData } from './$types';
@@ -40,10 +41,16 @@
 
 	// Pre-populate Location with the saved home address whenever the user switches
 	// to a home session, but only if they haven't already typed something in.
+	// Conversely, clear it when switching to public, but only if it's still the
+	// untouched home-address prefill rather than something the user typed.
 	$effect(() => {
 		if (kind === 'home') {
 			untrack(() => {
 				if (!location.trim()) location = homeAddress;
+			});
+		} else {
+			untrack(() => {
+				if (location.trim() === homeAddress.trim()) location = '';
 			});
 		}
 	});
@@ -196,7 +203,20 @@
 					required
 					style="width: 100%"
 					invalid={!!errors.location}
-				/>
+				>
+					{#snippet trailingIcon()}
+						<TextfieldIcon
+							role="button"
+							tabindex={location ? 0 : -1}
+							class="clear-location-icon"
+							style={location ? undefined : 'visibility: hidden'}
+							aria-label="Clear location"
+							onclick={() => (location = '')}
+						>
+							<Icon path={mdiClose} size={18} />
+						</TextfieldIcon>
+					{/snippet}
+				</Textfield>
 				{#if errors.location}<p class="field-error">{errors.location}</p>{/if}
 			</div>
 
@@ -394,6 +414,10 @@
 
 	.kind-toggle input {
 		margin: 0;
+	}
+
+	:global(.clear-location-icon) {
+		cursor: pointer;
 	}
 
 	.field-error {
