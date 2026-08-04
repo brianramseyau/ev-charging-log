@@ -52,10 +52,12 @@
 		<Content>
 			<p class="kpi-label">Avg efficiency</p>
 			<p class="kpi-value">
-				{data.kpis.avgEfficiency != null ? `${data.kpis.avgEfficiency.toFixed(2)} km/kWh` : '—'}
+				{data.kpis.avgKwhPer100Km != null
+					? `${data.kpis.avgKwhPer100Km.toFixed(2)} kWh/100km`
+					: '—'}
 			</p>
-			{#if data.kpis.avgKwhPer100Km != null}
-				<p class="kpi-subvalue">{data.kpis.avgKwhPer100Km.toFixed(2)} kWh/100km</p>
+			{#if data.kpis.avgEfficiency != null}
+				<p class="kpi-subvalue">{data.kpis.avgEfficiency.toFixed(2)} km/kWh</p>
 			{/if}
 		</Content>
 	</Card>
