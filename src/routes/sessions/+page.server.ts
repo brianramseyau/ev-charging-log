@@ -19,14 +19,16 @@ export const load: PageServerLoad = async () => {
 		db.select().from(settings).limit(1)
 	]);
 
-	const periodLabelById = new Map(periods.map((period) => [period.id, period.label]));
+	const periodById = new Map(periods.map((period) => [period.id, period]));
 
-	const rows = sortByDateTimeDesc(withEfficiency(sessions)).map((session) => ({
-		...session,
-		billingPeriodLabel: session.billingPeriodId
-			? (periodLabelById.get(session.billingPeriodId) ?? null)
-			: null
-	}));
+	const rows = sortByDateTimeDesc(withEfficiency(sessions)).map((session) => {
+		const period = session.billingPeriodId ? periodById.get(session.billingPeriodId) : undefined;
+		return {
+			...session,
+			billingPeriodLabel: period?.label ?? null,
+			periodSubmitted: isPeriodSubmitted(period)
+		};
+	});
 
 	return { sessions: rows, homeAddress: settingsRow?.homeAddress ?? null };
 };

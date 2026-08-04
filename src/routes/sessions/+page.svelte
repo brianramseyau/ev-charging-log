@@ -233,21 +233,23 @@
 						{session.kind === 'home' ? 'Home' : 'Public'}
 					</span>
 					<span class="session-row__datetime">{session.date} · {session.time}</span>
-					<form method="POST" action="?/delete" use:enhance class="delete-form">
-						<input type="hidden" name="id" value={session.id} />
-						<IconButton type="submit" aria-label="Delete session" title="Delete session">
-							<svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
-								<path
-									fill="none"
-									stroke="currentColor"
-									stroke-width="2"
-									stroke-linecap="round"
-									stroke-linejoin="round"
-									d="M4 7h16M9 4h6M8 7l1 13a2 2 0 0 0 2 2h2a2 2 0 0 0 2-2l1-13"
-								/>
-							</svg>
-						</IconButton>
-					</form>
+					{#if !session.periodSubmitted}
+						<form method="POST" action="?/delete" use:enhance class="delete-form">
+							<input type="hidden" name="id" value={session.id} />
+							<IconButton type="submit" aria-label="Delete session" title="Delete session">
+								<svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
+									<path
+										fill="none"
+										stroke="currentColor"
+										stroke-width="2"
+										stroke-linecap="round"
+										stroke-linejoin="round"
+										d="M4 7h16M9 4h6M8 7l1 13a2 2 0 0 0 2 2h2a2 2 0 0 0 2-2l1-13"
+									/>
+								</svg>
+							</IconButton>
+						</form>
+					{/if}
 				</div>
 				<div class="session-row__details">
 					<span>{session.odometerKm.toLocaleString()} km</span>
