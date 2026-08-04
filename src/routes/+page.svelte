@@ -54,6 +54,9 @@
 			<p class="kpi-value">
 				{data.kpis.avgEfficiency != null ? `${data.kpis.avgEfficiency.toFixed(2)} km/kWh` : '—'}
 			</p>
+			{#if data.kpis.avgKwhPer100Km != null}
+				<p class="kpi-subvalue">{data.kpis.avgKwhPer100Km.toFixed(2)} kWh/100km</p>
+			{/if}
 		</Content>
 	</Card>
 

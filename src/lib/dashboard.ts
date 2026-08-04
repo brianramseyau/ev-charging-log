@@ -125,6 +125,7 @@ export interface DashboardKpis {
 	lifetimeHomeKwh: number;
 	lifetimeCost: number;
 	avgEfficiency: number | null;
+	avgKwhPer100Km: number | null;
 	avgCostPerKwh: number | null;
 	avgCostPerKm: number | null;
 	currentPeriod: { label: string; homePct: number | null } | null;
@@ -148,6 +149,8 @@ export function computeKpis(
 			? efficiencySeries.reduce((sum, p) => sum + p.kmPerKwh, 0) / efficiencySeries.length
 			: null;
 
+	const avgKwhPer100Km = avgEfficiency != null && avgEfficiency > 0 ? 100 / avgEfficiency : null;
+
 	const avgCostPerKwh = lifetimeHomeKwh > 0 ? lifetimeCost / lifetimeHomeKwh : null;
 	const avgCostPerKm =
 		avgCostPerKwh != null && avgEfficiency != null && avgEfficiency > 0
@@ -168,6 +171,7 @@ export function computeKpis(
 		lifetimeHomeKwh,
 		lifetimeCost,
 		avgEfficiency,
+		avgKwhPer100Km,
 		avgCostPerKwh,
 		avgCostPerKm,
 		currentPeriod
