@@ -95,7 +95,7 @@ function dataRow(sheet: ExcelJS.Worksheet, rowNumber: number, s: ReportSession) 
 		cell.value = v as ExcelJS.CellValue;
 		cell.border = THIN_BORDER;
 		cell.alignment = { vertical: 'middle' };
-		if (i === 2) cell.numFmt = '#,##0.0';
+		if (i === 2) cell.numFmt = '#,##0';
 		if (i === 3) cell.numFmt = '0.00';
 		// Location text can be long (full street addresses); wrap it within the
 		// column instead of letting it overflow past the table's right border.

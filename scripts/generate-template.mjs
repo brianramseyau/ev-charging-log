@@ -84,7 +84,7 @@ function dataRow(rowNumber, time, date, odometer, kwh, location) {
 		cell.border = THIN_BORDER;
 		cell.alignment = { vertical: 'middle' };
 		if (i === 1) cell.numFmt = 'yyyy-mm-dd';
-		if (i === 2) cell.numFmt = '#,##0.0';
+		if (i === 2) cell.numFmt = '#,##0';
 		if (i === 3) cell.numFmt = '0.00';
 		if (i === 4) cell.alignment = { vertical: 'middle', wrapText: true };
 	});
