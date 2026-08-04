@@ -96,13 +96,18 @@ function totalRow(rowNumber, label, formula, numFmt) {
 	sheet.mergeCells(rowNumber, 1, rowNumber, 3);
 	const labelC = row.getCell(1);
 	labelC.value = label;
-	labelC.font = { bold: true };
-	labelC.alignment = { horizontal: 'right' };
+	labelC.font = { bold: true, color: { argb: 'FF0F766E' } };
+	labelC.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: TEAL_LIGHT } };
+	labelC.alignment = { vertical: 'middle', horizontal: 'right' };
+	labelC.border = THIN_BORDER;
 	const valueC = row.getCell(4);
 	valueC.value = { formula };
-	valueC.font = { bold: true };
+	valueC.font = { bold: true, color: { argb: 'FF0F766E' } };
+	valueC.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: TEAL_LIGHT } };
 	valueC.numFmt = numFmt ?? '#,##0.00';
 	valueC.border = THIN_BORDER;
+	valueC.alignment = { vertical: 'middle' };
+	row.height = 20;
 }
 
 // --- Header block (rows 1-4) ---
@@ -114,8 +119,10 @@ valueCell(sheet.getCell('B2'), '[Rego/VIN]');
 
 labelCell(sheet.getCell('A3'), 'Starting Date:');
 valueCell(sheet.getCell('B3'), new Date('2026-07-01'), 'yyyy-mm-dd');
+sheet.getCell('B3').alignment = { horizontal: 'left' };
 labelCell(sheet.getCell('D3'), 'Closing Date:');
 valueCell(sheet.getCell('E3'), new Date('2026-07-31'), 'yyyy-mm-dd');
+sheet.getCell('E3').alignment = { horizontal: 'left' };
 
 labelCell(sheet.getCell('A4'), 'Claiming kW/h:');
 sheet.getCell('B4').value = { formula: 'D11' };
@@ -146,13 +153,17 @@ const pctRow = sheet.getRow(20);
 sheet.mergeCells(20, 1, 20, 3);
 const pctLabel = pctRow.getCell(1);
 pctLabel.value = 'Percentage of Home Charging:';
-pctLabel.font = { bold: true };
-pctLabel.alignment = { horizontal: 'right' };
+pctLabel.font = { bold: true, color: { argb: WHITE }, size: 16 };
+pctLabel.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: TEAL } };
+pctLabel.alignment = { vertical: 'middle', horizontal: 'right' };
 const pctValue = pctRow.getCell(4);
 pctValue.value = { formula: 'D11/(D11+D18)' };
 pctValue.numFmt = '0.0%';
-pctValue.font = { bold: true };
-pctValue.border = THIN_BORDER;
+pctValue.font = { bold: true, color: { argb: WHITE }, size: 16 };
+pctValue.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: TEAL } };
+pctValue.alignment = { vertical: 'middle', horizontal: 'right' };
+pctRow.getCell(5).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: TEAL } };
+pctRow.height = 22;
 
 sheet.getRow(1).height = 18;
 sheet.getRow(2).height = 18;

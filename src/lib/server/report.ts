@@ -117,20 +117,25 @@ function totalRow(
 	sheet: ExcelJS.Worksheet,
 	rowNumber: number,
 	label: string,
-	formula: string,
+	value: ExcelJS.CellValue,
 	numFmt = '#,##0.00'
 ) {
 	const row = sheet.getRow(rowNumber);
 	safeMerge(sheet, rowNumber, 1, 3);
 	const labelC = row.getCell(1);
 	labelC.value = label;
-	labelC.font = { bold: true };
-	labelC.alignment = { horizontal: 'right' };
+	labelC.font = { bold: true, color: { argb: 'FF0F766E' } };
+	labelC.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: TEAL_LIGHT } };
+	labelC.alignment = { vertical: 'middle', horizontal: 'right' };
+	labelC.border = THIN_BORDER;
 	const valueC = row.getCell(4);
-	valueC.value = { formula };
-	valueC.font = { bold: true };
+	valueC.value = value;
+	valueC.font = { bold: true, color: { argb: 'FF0F766E' } };
+	valueC.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: TEAL_LIGHT } };
 	valueC.numFmt = numFmt;
 	valueC.border = THIN_BORDER;
+	valueC.alignment = { vertical: 'middle' };
+	row.height = 20;
 }
 
 /**
@@ -182,7 +187,9 @@ export async function generateReport(
 	// Dates are stored as ISO date strings; the cells keep the template's date numFmt,
 	// which Excel simply ignores for text values.
 	sheet.getCell('B3').value = period.startDate;
+	sheet.getCell('B3').alignment = { horizontal: 'left' };
 	sheet.getCell('E3').value = period.endDate;
+	sheet.getCell('E3').alignment = { horizontal: 'left' };
 
 	const homeKwhTotal = sumKwh(homeSessions);
 	const homeCostTotal = sumCost(homeSessions);
@@ -210,19 +217,11 @@ export async function generateReport(
 		sheet,
 		homeTotalRow,
 		'Total kWh Used (Home):',
-		homeSessions.length > 0 ? `SUM(D${homeDataStart}:D${homeDataEnd})` : '0'
+		homeSessions.length > 0 ? { formula: `SUM(D${homeDataStart}:D${homeDataEnd})` } : 0
 	);
 	row += 1;
 	const costRow = row;
-	sheet.getCell(`A${costRow}`).value = 'Cost (Total × Rate):';
-	safeMerge(sheet, costRow, 1, 3);
-	sheet.getCell(`A${costRow}`).font = { bold: true };
-	sheet.getCell(`A${costRow}`).alignment = { horizontal: 'right' };
-	const costCell = sheet.getCell(`D${costRow}`);
-	costCell.value = homeCostTotal;
-	costCell.numFmt = '$#,##0.00';
-	costCell.font = { bold: true };
-	costCell.border = THIN_BORDER;
+	totalRow(sheet, costRow, 'Cost (Total × Rate):', homeCostTotal, '$#,##0.00');
 	row += 2;
 
 	// --- Public / commercial charging table ---
@@ -246,7 +245,7 @@ export async function generateReport(
 		sheet,
 		publicTotalRow,
 		'Total kWh Claimed (Public):',
-		publicSessions.length > 0 ? `SUM(D${publicDataStart}:D${publicDataEnd})` : '0'
+		publicSessions.length > 0 ? { formula: `SUM(D${publicDataStart}:D${publicDataEnd})` } : 0
 	);
 	row += 2;
 
@@ -261,14 +260,23 @@ export async function generateReport(
 	safeMerge(sheet, pctRow, 1, 3);
 	const pctLabel = sheet.getCell(`A${pctRow}`);
 	pctLabel.value = 'Percentage of Home Charging:';
-	pctLabel.font = { bold: true };
-	pctLabel.alignment = { horizontal: 'right' };
+	pctLabel.font = { bold: true, color: { argb: WHITE }, size: 16 };
+	pctLabel.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: TEAL } };
+	pctLabel.alignment = { vertical: 'middle', horizontal: 'right' };
+	try {
+		sheet.unMergeCells(pctRow, 4, pctRow, 5);
+	} catch {
+		// no-op: nothing was merged there
+	}
 	const pctValue = sheet.getCell(`D${pctRow}`);
 	const denom = homeKwhTotal + publicKwhTotal;
 	pctValue.value = denom > 0 ? homeKwhTotal / denom : 0;
 	pctValue.numFmt = '0.0%';
-	pctValue.font = { bold: true };
-	pctValue.border = THIN_BORDER;
+	pctValue.font = { bold: true, color: { argb: WHITE }, size: 16 };
+	pctValue.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: TEAL } };
+	pctValue.alignment = { vertical: 'middle', horizontal: 'right' };
+	sheet.getCell(`E${pctRow}`).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: TEAL } };
+	sheet.getRow(pctRow).height = 22;
 
 	const buffer = await workbook.xlsx.writeBuffer();
 	return Buffer.from(buffer);
