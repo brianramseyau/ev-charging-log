@@ -98,7 +98,14 @@
 				"zip"
 			],
 			"category": "public.app-category.utilities",
-			"identity": null
+			"identity": null,
+			"arch": [
+				"x64",
+				"arm64"
+			]
+		},
+		"publish": {
+			"provider": "github"
 		}
 	}
 }

@@ -292,22 +292,30 @@ build with its own ABI (not the system Node's), so:
   category of problem the Dockerfile already solves for `arm64 musl`, just
   for a different runtime target.
 
-### 11.4 CI / release automation (not built yet — future work)
+### 11.4 CI / release automation
 
-Not part of the initial scaffold, but the shape for when it's wanted:
+`.github/workflows/electron-release.yml` builds and publishes the packaged
+app on every `vX.Y.Z` tag push (mirrors the trigger `docker-publish.yml`
+already uses for the Docker image):
 
-- `electron-builder` has built-in GitHub Releases publishing
-  (`electron-builder --publish always`), so a single workflow run can build
-  and attach artifacts to a release.
-- GitHub Actions workflow triggered on `push: tags: 'v*'`, matrix across
-  target OSes as platforms are added (native module rebuilds need to run on
-  the real OS — no cross-compiling the native bits from one runner).
+- Runs on `macos-latest` (native module rebuilds need to happen on the real
+  OS — no cross-compiling the native bits from one runner). Add OS entries to
+  the job matrix if/when Windows/Linux targets are added (§11.5).
+- `npm run electron:build -- --publish always` — `electron-builder`'s
+  built-in GitHub Releases publishing, using the workflow's own
+  `GITHUB_TOKEN` (needs `permissions: contents: write`) rather than a
+  separate PAT.
+- `package.json`'s `build.publish` is set to `{ "provider": "github" }`;
+  `build.mac.arch` lists both `x64` and `arm64` so a single tag push produces
+  artifacts for both Mac architectures.
 - Versioning: bump `package.json` `version`, tag `vX.Y.Z`, push tag →
-  workflow builds and publishes a draft/full GitHub Release with the packaged
-  artifact(s) attached.
+  workflow builds and publishes a draft GitHub Release (electron-builder's
+  default `releaseType`) with the packaged artifact(s) attached; publish the
+  draft manually once it looks right.
 - Signing/notarization deliberately out of scope for now (single-user,
-  unsigned build accepted per §11 intro) — revisit if this is ever shared
-  beyond personal use. Would need `CSC_LINK`/`CSC_KEY_PASSWORD` +
+  unsigned build accepted per §11 intro, `identity: null` in
+  `build.mac`) — revisit if this is ever shared beyond personal use. Would
+  need `CSC_LINK`/`CSC_KEY_PASSWORD` +
   `APPLE_ID`/`APPLE_APP_SPECIFIC_PASSWORD`/`APPLE_TEAM_ID` secrets for mac
   notarization, `WIN_CSC_LINK`/`WIN_CSC_KEY_PASSWORD` for Windows, at that
   point.
