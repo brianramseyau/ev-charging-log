@@ -7,7 +7,14 @@ on:
 
 jobs:
   release:
-    runs-on: macos-latest
+    # Native module rebuilds (better-sqlite3) need to happen on the real
+    # target OS, so each platform builds and publishes its own artifacts
+    # rather than cross-compiling from one runner.
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, windows-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
     permissions:
       contents: write
 

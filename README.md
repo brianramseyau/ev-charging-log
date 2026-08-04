@@ -114,9 +114,12 @@ Package a distributable `.dmg`/`.zip` with `electron-builder`:
 npm run electron:build
 ```
 
-Output lands in `release/`. This is a single-user, unsigned, macOS-only build
-for now — no auto-update, no Windows/Linux target, no code signing/
-notarization (see PLAN.md §11.5 for what's intentionally left out).
+Output lands in `release/`. This is a single-user, unsigned build — macOS
+(`.dmg`/`.zip`), Windows (`.exe` via NSIS), and Linux (`.AppImage`) targets
+are all packaged from `electron-release.yml` on tag push, one job per OS
+since native module rebuilds (`better-sqlite3`) need to happen on the real
+target platform. No code signing/notarization for any of them (see
+PLAN.md §11.5).
 
 ## Status
 
