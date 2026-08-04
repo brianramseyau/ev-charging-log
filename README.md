@@ -89,9 +89,17 @@ desktop app instead of (or alongside) the Docker deployment — see
 [PLAN.md §11](PLAN.md#11-electron-desktop-distribution-optional-alongside-docker)
 for the full design. It bundles the production `adapter-node` build and runs
 it as a local child process, with an Electron window pointed at
-`http://127.0.0.1:<port>`; the SQLite database lives under the OS's per-app
-data directory (`~/Library/Application Support/ev-charging-log` on macOS)
-rather than a Docker volume.
+`http://127.0.0.1:<port>`; by default the SQLite database lives under the
+OS's per-app data directory (`~/Library/Application Support/ev-charging-log`
+on macOS) as its own separate dataset from any Docker deployment.
+
+To have the desktop build read/write the _same_ database as an existing
+Docker deployment instead (e.g. a file shared over a network mount), create
+`config.json` in that per-app data directory before first launch:
+
+```json
+{ "databasePath": "/path/to/ev-charging-log.db" }
+```
 
 Run it in dev mode (rebuilds first, then launches Electron against that
 build):

@@ -5,10 +5,32 @@ const { app, BrowserWindow } = require('electron');
 const { fork } = require('node:child_process');
 const net = require('node:net');
 const path = require('node:path');
+const fs = require('node:fs');
 
 let serverProcess = null;
 let mainWindow = null;
 let serverPort = null;
+
+// Defaults to a per-app-data SQLite file (separate from any Docker deployment).
+// To point this build at an existing database instead — e.g. a Docker
+// deployment's file shared over a network mount — create
+// `<userData>/config.json` with `{ "databasePath": "/path/to/db" }` before
+// first launch. See README's "Desktop app (Electron)" section.
+function resolveDatabasePath() {
+	const userDataDir = app.getPath('userData');
+	const configPath = path.join(userDataDir, 'config.json');
+	if (fs.existsSync(configPath)) {
+		try {
+			const config = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
+			if (config.databasePath) {
+				return config.databasePath;
+			}
+		} catch (err) {
+			console.error(`Failed to read ${configPath}, using default database path:`, err);
+		}
+	}
+	return path.join(userDataDir, 'ev-charging-log.db');
+}
 
 function getFreePort() {
 	return new Promise((resolve, reject) => {
@@ -47,7 +69,7 @@ function waitForServer(port, timeoutMs = 15000) {
 
 async function startServer() {
 	const port = await getFreePort();
-	const dbPath = path.join(app.getPath('userData'), 'ev-charging-log.db');
+	const dbPath = resolveDatabasePath();
 
 	// ELECTRON_RUN_AS_NODE makes Electron's own bundled executable behave as a
 	// plain Node runtime, so the packaged app has no external Node dependency.
