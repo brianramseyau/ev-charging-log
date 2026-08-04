@@ -2,11 +2,24 @@
 	import { enhance } from '$app/forms';
 	import Button, { Label } from '@smui/button';
 	import Card from '@smui/card';
+	import Textfield from '@smui/textfield';
+	import DateTimeField from '$lib/components/DateTimeField.svelte';
 	import type { ActionData, PageData } from './$types';
 
 	let { data, form }: { data: PageData; form: ActionData } = $props();
 
 	let showForm = $state(false);
+	let label = $state('');
+	let startDate = $state('');
+	let endDate = $state('');
+
+	$effect(() => {
+		if (form) {
+			label = form.label ?? '';
+			startDate = form.startDate ?? '';
+			endDate = form.endDate ?? '';
+		}
+	});
 
 	function formatRange(startDate: string, endDate: string) {
 		return `${startDate} – ${endDate}`;
@@ -33,31 +46,35 @@
 			use:enhance={() => {
 				return async ({ result, update }) => {
 					await update();
-					if (result.type === 'success') showForm = false;
+					if (result.type === 'success') {
+						showForm = false;
+						label = '';
+						startDate = '';
+						endDate = '';
+					}
 				};
 			}}
 		>
 			{#if form?.error}
 				<p class="form-error">{form.error}</p>
 			{/if}
-			<label class="field">
-				<span>Label</span>
-				<input
-					type="text"
-					name="label"
-					placeholder="e.g. July 2026"
-					value={form?.label ?? ''}
-					required
-				/>
-			</label>
-			<label class="field">
-				<span>Start date</span>
-				<input type="date" name="startDate" value={form?.startDate ?? ''} required />
-			</label>
-			<label class="field">
-				<span>End date</span>
-				<input type="date" name="endDate" value={form?.endDate ?? ''} required />
-			</label>
+			<Textfield
+				variant="outlined"
+				label="Label"
+				bind:value={label}
+				input$name="label"
+				input$placeholder="e.g. July 2026"
+				required
+				style="width: 100%"
+			/>
+			<DateTimeField
+				type="date"
+				label="Start date"
+				name="startDate"
+				bind:value={startDate}
+				required
+			/>
+			<DateTimeField type="date" label="End date" name="endDate" bind:value={endDate} required />
 			<Button variant="raised" type="submit">
 				<Label>Save period</Label>
 			</Button>
@@ -107,22 +124,6 @@
 		display: flex;
 		flex-direction: column;
 		gap: 0.85rem;
-	}
-
-	.field {
-		display: flex;
-		flex-direction: column;
-		gap: 0.3rem;
-		font-size: 0.85rem;
-		color: #334155;
-	}
-
-	.field input {
-		font-size: 1rem;
-		padding: 0.55rem 0.6rem;
-		border: 1px solid #cbd5e1;
-		border-radius: 6px;
-		font-family: inherit;
 	}
 
 	.form-error {

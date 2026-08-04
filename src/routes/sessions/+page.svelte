@@ -5,6 +5,7 @@
 	import Card, { Content } from '@smui/card';
 	import IconButton from '@smui/icon-button';
 	import Textfield from '@smui/textfield';
+	import DateTimeField from '$lib/components/DateTimeField.svelte';
 	import type { ActionData, PageData } from './$types';
 
 	let { data, form }: { data: PageData; form: ActionData } = $props();
@@ -111,31 +112,25 @@
 			</div>
 
 			<div class="field-row">
-				<Textfield
-					variant="outlined"
+				<DateTimeField
 					type="date"
 					label="Date"
+					name="date"
 					bind:value={date}
-					input$name="date"
 					required
-					style="width: 100%"
-					invalid={!!errors.date}
+					error={errors.date}
 				/>
-				{#if errors.date}<p class="field-error">{errors.date}</p>{/if}
 			</div>
 
 			<div class="field-row">
-				<Textfield
-					variant="outlined"
+				<DateTimeField
 					type="time"
 					label="Time"
+					name="time"
 					bind:value={time}
-					input$name="time"
 					required
-					style="width: 100%"
-					invalid={!!errors.time}
+					error={errors.time}
 				/>
-				{#if errors.time}<p class="field-error">{errors.time}</p>{/if}
 			</div>
 
 			<div class="field-row">

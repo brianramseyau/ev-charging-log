@@ -80,6 +80,7 @@
 	:global(html) {
 		--charge-home-color: #3987e5;
 		--charge-public-color: #d95926;
+		color-scheme: light dark;
 	}
 
 	:global(body) {

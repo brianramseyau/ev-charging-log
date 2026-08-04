@@ -55,6 +55,27 @@ When changing business logic (cost calculation, billing-period assignment, effic
 - PWA via `@vite-pwa/sveltekit`.
 - Deployment is a single Docker image (PUID/PGID-aware entrypoint at `docker/entrypoint.sh`) to Unraid — see `unraid/ev-charging-log.xml`. No docker-compose.
 
+## Browser testing
+
+Playwright is a dev dependency (Chromium only) specifically so UI changes can be verified visually instead of reasoned about blind — this matters here because SMUI/MDC's CSS resets (`appearance: none`, `display: flex` on inputs, etc.) have caused real regressions that type-checking and unit tests can't catch. For any UI change, start the dev server, drive it with Playwright, and look at the screenshot before calling the work done:
+
+```sh
+npm run dev &
+node -e "
+const { chromium } = require('playwright');
+(async () => {
+  const browser = await chromium.launch();
+  const page = await browser.newPage();
+  await page.goto('http://localhost:5173/<route>');
+  await page.waitForSelector('text=<something on the page>');
+  await page.screenshot({ path: '/tmp/check.png' });
+  await browser.close();
+})();
+"
+```
+
+Check both light and dark mode by passing `colorScheme: 'light' | 'dark'` to `browser.newPage()` / `browser.newContext()` — this app is dark-theme-first and several past bugs (e.g. native date/time picker icons) only showed up in one mode.
+
 ## Privacy
 
 This project handles real personal data (vehicle details, home address, charging history). The live SQLite db (`data/`), `.env`, and raw spreadsheets are gitignored and must never be committed.
