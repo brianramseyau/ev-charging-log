@@ -10,6 +10,20 @@ run on a home network (Unraid).
 
 See [PLAN.md](PLAN.md) for the full project plan, data model, and build phases.
 
+## Screenshots
+
+### Desktop
+
+| Dashboard | Billing period detail |
+| --- | --- |
+| <img src="docs/images/dashboard-desktop.png" width="420" alt="Dashboard, desktop"> | <img src="docs/images/period-detail-desktop.png" width="420" alt="Billing period detail, desktop"> |
+
+### Mobile
+
+| Dashboard | Billing period detail |
+| --- | --- |
+| <img src="docs/images/dashboard-mobile.png" width="220" alt="Dashboard, mobile"> | <img src="docs/images/period-detail-mobile.png" width="220" alt="Billing period detail, mobile"> |
+
 ## Features
 
 - Log home and public charging sessions (time, date, odometer, kWh, location).
