@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
 	findBillingPeriodId,
+	hasUnresolvedDrafts,
 	isOdometerBelowLastRecorded,
 	isPeriodSubmitted,
 	mostRecentOdometer,
@@ -9,7 +10,7 @@ import {
 	withEfficiency
 } from './sessions';
 
-const s = (id: number, date: string, time: string, odometerKm: number, kwhUsed: number) => ({
+const s = (id: number, date: string, time: string, odometerKm: number, kwhUsed: number | null) => ({
 	id,
 	date,
 	time,
@@ -118,5 +119,42 @@ describe('withEfficiency', () => {
 		const result = withEfficiency(rows);
 		expect(result.map((r) => r.id)).toEqual([1, 2]);
 		expect(result[1].efficiencyKmPerKwh).toBeNull();
+	});
+
+	it('is null for a draft session (kWh not yet recorded)', () => {
+		const rows = [s(1, '2026-08-01', '09:00', 1000, 10), s(2, '2026-08-05', '09:00', 1150, null)];
+		const result = withEfficiency(rows);
+		expect(result[1].efficiencyKmPerKwh).toBeNull();
+	});
+
+	it("still uses a draft session's odometer as the previous reading for the next session", () => {
+		const rows = [
+			s(1, '2026-08-01', '09:00', 1000, null), // draft
+			s(2, '2026-08-05', '09:00', 1150, 15)
+		];
+		const result = withEfficiency(rows);
+		expect(result[1].efficiencyKmPerKwh).toBeCloseTo(10, 5); // (1150-1000)/15
+	});
+});
+
+describe('hasUnresolvedDrafts', () => {
+	it('is true when a session with no kWh recorded belongs to the period', () => {
+		const sessions = [
+			{ billingPeriodId: 1, kwhUsed: null },
+			{ billingPeriodId: 2, kwhUsed: 10 }
+		];
+		expect(hasUnresolvedDrafts(1, sessions)).toBe(true);
+	});
+
+	it('is false when every session in the period has kWh recorded', () => {
+		const sessions = [
+			{ billingPeriodId: 1, kwhUsed: 10 },
+			{ billingPeriodId: 2, kwhUsed: null }
+		];
+		expect(hasUnresolvedDrafts(1, sessions)).toBe(false);
+	});
+
+	it('is false for an empty session list', () => {
+		expect(hasUnresolvedDrafts(1, [])).toBe(false);
 	});
 });

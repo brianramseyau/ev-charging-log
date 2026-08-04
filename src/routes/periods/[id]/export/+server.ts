@@ -10,7 +10,7 @@ function toReportSession(s: typeof chargingSessions.$inferSelect): ReportSession
 		time: s.time,
 		date: s.date,
 		odometerKm: s.odometerKm,
-		kwhUsed: s.kwhUsed,
+		kwhUsed: s.kwhUsed ?? 0,
 		location: s.location,
 		cost: s.cost
 	};
@@ -31,8 +31,12 @@ export const GET: RequestHandler = async ({ params }) => {
 
 	const [settingsRow] = await db.select().from(settings).limit(1);
 
-	const homeSessions = sessions.filter((s) => s.kind === 'home').map(toReportSession);
-	const publicSessions = sessions.filter((s) => s.kind === 'public').map(toReportSession);
+	// Drafts (kwhUsed not yet recorded) have no cost yet; ?/submit already
+	// blocks submitting a period while any remain, but exclude them here too
+	// in case the export link is hit directly on an unsubmitted period.
+	const completedSessions = sessions.filter((s) => s.kwhUsed != null);
+	const homeSessions = completedSessions.filter((s) => s.kind === 'home').map(toReportSession);
+	const publicSessions = completedSessions.filter((s) => s.kind === 'public').map(toReportSession);
 
 	const buffer = await generateReport(
 		{ label: period.label, startDate: period.startDate, endDate: period.endDate },

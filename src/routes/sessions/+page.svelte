@@ -25,7 +25,14 @@
 	let location = $state(untrack(() => data.homeAddress) ?? '');
 	let notes = $state('');
 
+	// kWh is optional: leaving it blank saves the session as a draft (just the bits
+	// known when plugging in), to be completed once charging finishes and kWh is known.
+	// SMUI's number Textfield can hand back either a string or a number, so check
+	// loosely rather than assuming .trim() exists.
+	const willBeDraft = $derived(!kwhUsed);
+
 	let submitting = $state(false);
+	let completingId = $state<number | null>(null);
 
 	const PAGE_SIZE = 5;
 	let visibleCount = $state(PAGE_SIZE);
@@ -64,6 +71,8 @@
 	}
 
 	const errors = $derived(form?.errors ?? {});
+	const completeError = $derived(form?.completeError ?? null);
+	const completeErrorId = $derived(form?.completeId ?? null);
 
 	function formatCost(cost: number | null) {
 		return cost == null ? null : `$${cost.toFixed(2)}`;
@@ -159,16 +168,21 @@
 				<Textfield
 					variant="outlined"
 					type="number"
-					label="kWh used"
+					label="kWh used (optional)"
 					bind:value={kwhUsed}
 					input$name="kwhUsed"
 					input$step="0.01"
 					input$min="0"
-					required
 					style="width: 100%"
 					invalid={!!errors.kwhUsed}
 				/>
-				{#if errors.kwhUsed}<p class="field-error">{errors.kwhUsed}</p>{/if}
+				{#if errors.kwhUsed}
+					<p class="field-error">{errors.kwhUsed}</p>
+				{:else}
+					<p class="field-hint">
+						Leave blank to save as a draft — you can fill this in once charging finishes.
+					</p>
+				{/if}
 			</div>
 
 			<div class="field-row">
@@ -196,12 +210,14 @@
 			</div>
 
 			<Button variant="raised" type="submit" disabled={submitting} style="width: 100%">
-				<Label>{submitting ? 'Saving…' : 'Save session'}</Label>
+				<Label>{submitting ? 'Saving…' : willBeDraft ? 'Save draft' : 'Save session'}</Label>
 			</Button>
 
 			{#if form?.success}
 				<div class="save-feedback">
-					<p class="save-feedback__ok">Session saved.</p>
+					<p class="save-feedback__ok">
+						{form.isDraft ? 'Draft saved — add kWh once charging finishes.' : 'Session saved.'}
+					</p>
 					{#if form.odometerWarning}
 						<p class="save-feedback__warning">
 							Warning: this odometer reading is lower than the last recorded reading.
@@ -228,11 +244,14 @@
 {:else}
 	<ul class="session-list">
 		{#each visibleSessions as session (session.id)}
-			<li class="session-row">
+			<li class="session-row" class:session-row--draft={session.kwhUsed == null}>
 				<div class="session-row__top">
 					<span class="badge" class:badge--home={session.kind === 'home'}>
 						{session.kind === 'home' ? 'Home' : 'Public'}
 					</span>
+					{#if session.kwhUsed == null}
+						<span class="badge badge--draft">Draft</span>
+					{/if}
 					<span class="session-row__datetime">{session.date} · {session.time}</span>
 					{#if !session.periodSubmitted}
 						<form method="POST" action="?/delete" use:enhance class="delete-form">
@@ -245,7 +264,9 @@
 				</div>
 				<div class="session-row__details">
 					<span>{session.odometerKm.toLocaleString()} km</span>
-					<span>{session.kwhUsed} kWh</span>
+					{#if session.kwhUsed != null}
+						<span>{session.kwhUsed} kWh</span>
+					{/if}
 					<span>{session.location}</span>
 					{#if session.cost != null}
 						<span>{formatCost(session.cost)}</span>
@@ -265,6 +286,39 @@
 				</div>
 				{#if session.notes}
 					<p class="session-row__notes">{session.notes}</p>
+				{/if}
+				{#if session.kwhUsed == null && !session.periodSubmitted}
+					<form
+						method="POST"
+						action="?/complete"
+						class="complete-form"
+						use:enhance={() => {
+							completingId = session.id;
+							return async ({ update }) => {
+								completingId = null;
+								await update();
+							};
+						}}
+					>
+						<input type="hidden" name="id" value={session.id} />
+						<label class="complete-form__field">
+							<span class="complete-form__label">kWh used</span>
+							<input
+								type="number"
+								name="kwhUsed"
+								step="0.01"
+								min="0"
+								required
+								class:invalid={completeErrorId === session.id && !!completeError}
+							/>
+						</label>
+						<Button variant="outlined" type="submit" disabled={completingId === session.id}>
+							<Label>{completingId === session.id ? 'Saving…' : 'Complete'}</Label>
+						</Button>
+					</form>
+					{#if completeErrorId === session.id && completeError}
+						<p class="field-error">{completeError}</p>
+					{/if}
 				{/if}
 			</li>
 		{/each}
@@ -346,6 +400,12 @@
 		margin: 0.25rem 0 0;
 	}
 
+	.field-hint {
+		color: #64748b;
+		font-size: 0.8rem;
+		margin: 0.25rem 0 0;
+	}
+
 	.page-error {
 		margin: 0 0 1rem;
 	}
@@ -389,6 +449,41 @@
 		padding: 0.75rem 0.9rem;
 	}
 
+	.session-row--draft {
+		border-color: #f59e0b;
+		border-style: dashed;
+	}
+
+	.complete-form {
+		display: flex;
+		align-items: flex-end;
+		gap: 0.5rem;
+		margin-top: 0.6rem;
+	}
+
+	.complete-form__field {
+		flex: 1;
+		display: flex;
+		flex-direction: column;
+		gap: 0.3rem;
+		font-size: 0.85rem;
+		color: #334155;
+	}
+
+	.complete-form__field input {
+		font-size: 1rem;
+		padding: 0.55rem 0.6rem;
+		border: 1px solid #cbd5e1;
+		border-radius: 6px;
+		font-family: inherit;
+		background: #fff;
+		color-scheme: light;
+	}
+
+	.complete-form__field input.invalid {
+		border-color: #b91c1c;
+	}
+
 	.session-row__top {
 		display: flex;
 		align-items: center;
@@ -419,6 +514,11 @@
 	.badge--home {
 		background: color-mix(in srgb, var(--charge-home-color) 15%, white);
 		color: var(--charge-home-color);
+	}
+
+	.badge--draft {
+		background: #fef3c7;
+		color: #92400e;
 	}
 
 	.session-row__details {
@@ -459,6 +559,10 @@
 			color: #94a3b8;
 		}
 
+		.field-hint {
+			color: #94a3b8;
+		}
+
 		.kind-toggle label {
 			border-color: rgba(255, 255, 255, 0.2);
 		}
@@ -473,12 +577,21 @@
 			color: #fff;
 		}
 
+		.badge--draft {
+			background: #78350f;
+			color: #fde68a;
+		}
+
 		.empty-state {
 			color: #94a3b8;
 		}
 
 		.session-row {
 			border-color: rgba(255, 255, 255, 0.12);
+		}
+
+		.session-row--draft {
+			border-color: #d97706;
 		}
 
 		.session-row__details {
@@ -491,6 +604,17 @@
 
 		.session-row__notes {
 			color: #cbd5e1;
+		}
+
+		.complete-form__field {
+			color: #94a3b8;
+		}
+
+		.complete-form__field input {
+			background: #1e293b;
+			border-color: rgba(255, 255, 255, 0.2);
+			color: #e2e8f0;
+			color-scheme: dark;
 		}
 	}
 </style>

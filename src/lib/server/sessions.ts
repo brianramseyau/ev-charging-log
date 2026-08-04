@@ -10,7 +10,7 @@ export interface SessionDateTime {
 export interface SessionRow extends SessionDateTime {
 	id: number;
 	odometerKm: number;
-	kwhUsed: number;
+	kwhUsed: number | null; // null for draft sessions, whose kWh isn't known yet
 }
 
 export interface BillingPeriodRange {
@@ -78,7 +78,9 @@ export function findBillingPeriodId(date: string, periods: BillingPeriodRange[])
 /**
  * Attaches a km/kWh efficiency figure to each session: the distance travelled
  * since the previous session (by date/time order, any kind) divided by this
- * session's kWh used. Null for the first session, or when kWh used is 0.
+ * session's kWh used. Null for the first session, a draft session (no kWh
+ * recorded yet), or when kWh used is 0. A draft session's own odometer
+ * reading still counts as a valid "previous" reading for the session after it.
  *
  * Returns sessions in ascending chronological order.
  */
@@ -89,7 +91,21 @@ export function withEfficiency<T extends SessionRow>(
 	return asc.map((curr, i) => {
 		const prev = asc[i - 1];
 		const efficiencyKmPerKwh =
-			prev && curr.kwhUsed > 0 ? (curr.odometerKm - prev.odometerKm) / curr.kwhUsed : null;
+			prev && curr.kwhUsed != null && curr.kwhUsed > 0
+				? (curr.odometerKm - prev.odometerKm) / curr.kwhUsed
+				: null;
 		return { ...curr, efficiencyKmPerKwh };
 	});
+}
+
+/**
+ * True if any session in `sessions` belonging to billing period `periodId`
+ * is still a draft (kWh not yet recorded — see SessionRow.kwhUsed). Used to
+ * block submitting a period whose report would otherwise silently omit that
+ * session's kWh/cost.
+ */
+export function hasUnresolvedDrafts<
+	T extends { billingPeriodId: number | null; kwhUsed: number | null }
+>(periodId: number, sessions: T[]): boolean {
+	return sessions.some((s) => s.billingPeriodId === periodId && s.kwhUsed == null);
 }

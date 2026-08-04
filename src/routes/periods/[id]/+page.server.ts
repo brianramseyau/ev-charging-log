@@ -1,5 +1,6 @@
 import { db } from '$lib/server/db';
 import { billingPeriods, chargingSessions } from '$lib/server/db/schema';
+import { hasUnresolvedDrafts } from '$lib/server/sessions';
 import { asc, eq, sql } from 'drizzle-orm';
 import { error, fail, redirect } from '@sveltejs/kit';
 import type { Actions, PageServerLoad } from './$types';
@@ -17,8 +18,15 @@ export const load: PageServerLoad = async ({ params }) => {
 		.where(eq(chargingSessions.billingPeriodId, id))
 		.orderBy(asc(chargingSessions.date), asc(chargingSessions.time));
 
-	const homeSessions = sessions.filter((s) => s.kind === 'home');
-	const publicSessions = sessions.filter((s) => s.kind === 'public');
+	// Drafts (kwhUsed not yet recorded) are shown separately and left out of the
+	// report totals, since there's nothing to sum yet. Completed sessions always
+	// have kwhUsed set, so it's safe to default the type down to non-null here.
+	const draftSessions = sessions.filter((s) => s.kwhUsed == null);
+	const completedSessions = sessions
+		.filter((s) => s.kwhUsed != null)
+		.map((s) => ({ ...s, kwhUsed: s.kwhUsed ?? 0 }));
+	const homeSessions = completedSessions.filter((s) => s.kind === 'home');
+	const publicSessions = completedSessions.filter((s) => s.kind === 'public');
 
 	const homeKwhTotal = homeSessions.reduce((sum, s) => sum + s.kwhUsed, 0);
 	const homeCostTotal = homeSessions.reduce((sum, s) => sum + (s.cost ?? 0), 0);
@@ -30,6 +38,7 @@ export const load: PageServerLoad = async ({ params }) => {
 		period,
 		homeSessions,
 		publicSessions,
+		draftSessions,
 		totals: {
 			homeKwhTotal,
 			homeCostTotal,
@@ -43,6 +52,21 @@ export const actions: Actions = {
 	submit: async ({ params }) => {
 		const id = Number(params.id);
 		if (!Number.isInteger(id)) throw error(404, 'Billing period not found');
+
+		const sessions = await db
+			.select({
+				billingPeriodId: chargingSessions.billingPeriodId,
+				kwhUsed: chargingSessions.kwhUsed
+			})
+			.from(chargingSessions)
+			.where(eq(chargingSessions.billingPeriodId, id));
+
+		if (hasUnresolvedDrafts(id, sessions)) {
+			return fail(400, {
+				error:
+					'This period has draft sessions still missing kWh. Complete them before submitting, so the report includes their cost.'
+			});
+		}
 
 		await db
 			.update(billingPeriods)

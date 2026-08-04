@@ -71,9 +71,17 @@ export const actions: Actions = {
 			errors.odometerKm = 'Enter a valid odometer reading (km).';
 		}
 
-		const kwhUsed = values.kwhUsed ? Number(values.kwhUsed) : NaN;
-		if (!values.kwhUsed || Number.isNaN(kwhUsed) || kwhUsed <= 0) {
-			errors.kwhUsed = 'Enter kWh used, greater than 0.';
+		// kWh is optional: leaving it blank saves the session as a draft (just the
+		// bits known when plugging in — date/time/odometer/location), to be
+		// completed with kWh once charging finishes. If something was typed, though,
+		// it has to be a valid amount.
+		const kwhRaw = values.kwhUsed?.trim();
+		let kwhUsed: number | null = null;
+		if (kwhRaw) {
+			kwhUsed = Number(kwhRaw);
+			if (Number.isNaN(kwhUsed) || kwhUsed <= 0) {
+				errors.kwhUsed = 'Enter kWh used, greater than 0, or leave blank to save as a draft.';
+			}
 		}
 
 		const location = values.location?.trim();
@@ -105,7 +113,7 @@ export const actions: Actions = {
 
 		let cost: number | null = null;
 		let noRatePlan = false;
-		if (kind === 'home') {
+		if (kwhUsed != null && kind === 'home') {
 			const plans = await db.select().from(ratePlans);
 			const plan = resolveRatePlan(date, plans);
 			if (plan) {
@@ -129,10 +137,65 @@ export const actions: Actions = {
 
 		return {
 			success: true,
+			isDraft: kwhUsed == null,
 			odometerWarning,
 			unassigned: billingPeriodId == null,
 			noRatePlan
 		};
+	},
+
+	complete: async ({ request }) => {
+		const form = await request.formData();
+		const id = Number(form.get('id'));
+		if (!id || Number.isNaN(id)) {
+			return fail(400, { completeError: 'Missing or invalid session id.', completeId: id });
+		}
+
+		const [session] = await db.select().from(chargingSessions).where(eq(chargingSessions.id, id));
+		if (!session) {
+			return fail(400, { completeError: 'Session not found.', completeId: id });
+		}
+		if (session.kwhUsed != null) {
+			return fail(400, { completeError: 'Session is already complete.', completeId: id });
+		}
+
+		if (session.billingPeriodId != null) {
+			const [period] = await db
+				.select()
+				.from(billingPeriods)
+				.where(eq(billingPeriods.id, session.billingPeriodId));
+			if (isPeriodSubmitted(period)) {
+				return fail(400, {
+					completeError: `"${period.label}" has already been submitted and can't accept changes. Unsubmit it first if you need to complete this session.`,
+					completeId: id
+				});
+			}
+		}
+
+		const kwhRaw = form.get('kwhUsed')?.toString() ?? '';
+		const kwhUsed = kwhRaw ? Number(kwhRaw) : NaN;
+		if (!kwhRaw || Number.isNaN(kwhUsed) || kwhUsed <= 0) {
+			return fail(400, {
+				completeError: 'Enter kWh used, greater than 0.',
+				completeId: id
+			});
+		}
+
+		let cost: number | null = null;
+		let noRatePlan = false;
+		if (session.kind === 'home') {
+			const plans = await db.select().from(ratePlans);
+			const plan = resolveRatePlan(session.date, plans);
+			if (plan) {
+				cost = calculateSessionCost({ date: session.date, time: session.time, kwhUsed }, plan);
+			} else {
+				noRatePlan = true;
+			}
+		}
+
+		await db.update(chargingSessions).set({ kwhUsed, cost }).where(eq(chargingSessions.id, id));
+
+		return { completed: true, completedId: id, noRatePlan };
 	},
 
 	delete: async ({ request }) => {
