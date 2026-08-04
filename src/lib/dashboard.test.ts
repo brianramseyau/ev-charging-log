@@ -118,11 +118,13 @@ describe('computeKpis', () => {
 			lifetimeHomeKwh: 0,
 			lifetimeCost: 0,
 			avgEfficiency: null,
+			avgCostPerKwh: null,
+			avgCostPerKm: null,
 			currentPeriod: null
 		});
 	});
 
-	it('sums lifetime home kWh/cost (ignoring public) and averages efficiency', () => {
+	it('sums lifetime home kWh/cost (ignoring public), averages efficiency, and derives cost per kWh/km', () => {
 		const sessions: DashboardSession[] = [
 			session({ id: 1, kind: 'home', kwhUsed: 10, cost: 3 }),
 			session({ id: 2, kind: 'public', kwhUsed: 100, cost: null }),
@@ -136,6 +138,8 @@ describe('computeKpis', () => {
 		expect(kpis.lifetimeHomeKwh).toBe(30);
 		expect(kpis.lifetimeCost).toBe(9);
 		expect(kpis.avgEfficiency).toBe(10);
+		expect(kpis.avgCostPerKwh).toBe(0.3);
+		expect(kpis.avgCostPerKm).toBeCloseTo(0.03);
 		expect(kpis.currentPeriod).toBeNull();
 	});
 

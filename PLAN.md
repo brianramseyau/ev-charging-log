@@ -229,3 +229,4 @@ ev-charging-log/
 [x] Enhancement: add date and time pickers in the sessions adding page, a date picker already exists in the periods add page so this can be re-used (ensure its turned into a component if code-reuse is required and not built-in).
 [x] Fix: For a mobile-first app, the Periods view page is very unfriendly with excessing x-scroll. Rework this area to be far more mobile friendly, this is already achieved in the Sessions history relatively well (though has less data it needs to show).
 [x] Enhancement: add pagination to the sessions page history, should load no more than 5 at a time (about a screen full on a modern smartphone).
+[x] Enhancement: Add average cost per kWh and average cost per km KPIs to the dashboard, with the cost-per-km figure compared against the AU government mileage reimbursement rate (5.47c/km) — coloured green when actual cost per km is above the rate (net gain from claiming), red when at or below it.

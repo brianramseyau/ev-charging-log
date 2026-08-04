@@ -118,10 +118,15 @@ export function computePeriodSplits(
 		});
 }
 
+/** NZ government mileage reimbursement rate, in dollars per km, for comparison against actual home-charging cost per km. */
+export const GOVERNMENT_RATE_PER_KM = 0.0547;
+
 export interface DashboardKpis {
 	lifetimeHomeKwh: number;
 	lifetimeCost: number;
 	avgEfficiency: number | null;
+	avgCostPerKwh: number | null;
+	avgCostPerKm: number | null;
 	currentPeriod: { label: string; homePct: number | null } | null;
 }
 
@@ -143,6 +148,12 @@ export function computeKpis(
 			? efficiencySeries.reduce((sum, p) => sum + p.kmPerKwh, 0) / efficiencySeries.length
 			: null;
 
+	const avgCostPerKwh = lifetimeHomeKwh > 0 ? lifetimeCost / lifetimeHomeKwh : null;
+	const avgCostPerKm =
+		avgCostPerKwh != null && avgEfficiency != null && avgEfficiency > 0
+			? avgCostPerKwh / avgEfficiency
+			: null;
+
 	const mostRecent = [...periods].sort((a, b) =>
 		a.endDate < b.endDate ? 1 : a.endDate > b.endDate ? -1 : 0
 	)[0];
@@ -153,5 +164,12 @@ export function computeKpis(
 		currentPeriod = { label: split.label, homePct: split.homePct };
 	}
 
-	return { lifetimeHomeKwh, lifetimeCost, avgEfficiency, currentPeriod };
+	return {
+		lifetimeHomeKwh,
+		lifetimeCost,
+		avgEfficiency,
+		avgCostPerKwh,
+		avgCostPerKm,
+		currentPeriod
+	};
 }

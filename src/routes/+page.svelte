@@ -4,9 +4,14 @@
 	import EfficiencyLineChart from '$lib/components/charts/EfficiencyLineChart.svelte';
 	import HomePublicSplitChart from '$lib/components/charts/HomePublicSplitChart.svelte';
 	import CostTrendChart from '$lib/components/charts/CostTrendChart.svelte';
+	import { GOVERNMENT_RATE_PER_KM } from '$lib/dashboard';
 	import type { PageData } from './$types';
 
 	let { data }: { data: PageData } = $props();
+
+	const costPerKmDeltaCents = $derived(
+		data.kpis.avgCostPerKm != null ? (data.kpis.avgCostPerKm - GOVERNMENT_RATE_PER_KM) * 100 : null
+	);
 
 	const hasAnyData = $derived(
 		data.efficiencySeries.length > 0 ||
@@ -49,6 +54,35 @@
 			<p class="kpi-value">
 				{data.kpis.avgEfficiency != null ? `${data.kpis.avgEfficiency.toFixed(2)} km/kWh` : '—'}
 			</p>
+		</Content>
+	</Card>
+
+	<Card padded class="kpi-card">
+		<Content>
+			<p class="kpi-label">Avg cost per kWh</p>
+			<p class="kpi-value">
+				{data.kpis.avgCostPerKwh != null ? `$${data.kpis.avgCostPerKwh.toFixed(2)}` : '—'}
+			</p>
+		</Content>
+	</Card>
+
+	<Card padded class="kpi-card">
+		<Content>
+			<p class="kpi-label">Avg cost per km</p>
+			<p class="kpi-value">
+				{data.kpis.avgCostPerKm != null ? `${(data.kpis.avgCostPerKm * 100).toFixed(1)}¢` : '—'}
+			</p>
+			{#if costPerKmDeltaCents != null}
+				<p
+					class="kpi-subvalue"
+					class:kpi-good={costPerKmDeltaCents > 0}
+					class:kpi-bad={costPerKmDeltaCents <= 0}
+				>
+					{costPerKmDeltaCents <= 0 ? '−' : '+'}{Math.abs(costPerKmDeltaCents).toFixed(1)}¢ vs {(
+						GOVERNMENT_RATE_PER_KM * 100
+					).toFixed(2)}¢ govt rate
+				</p>
+			{/if}
 		</Content>
 	</Card>
 
@@ -141,9 +175,30 @@
 		font-weight: 600;
 	}
 
+	.kpi-subvalue {
+		margin: 0.15rem 0 0;
+		font-size: 0.75rem;
+	}
+
+	.kpi-good {
+		color: #16a34a;
+	}
+
+	.kpi-bad {
+		color: #dc2626;
+	}
+
 	@media (prefers-color-scheme: dark) {
 		.kpi-label {
 			color: #94a3b8;
+		}
+
+		.kpi-good {
+			color: #4ade80;
+		}
+
+		.kpi-bad {
+			color: #f87171;
 		}
 	}
 
