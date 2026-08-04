@@ -3,6 +3,7 @@
 	"private": true,
 	"version": "0.0.1",
 	"type": "module",
+	"main": "electron/main.cjs",
 	"engines": {
 		"node": "24.x"
 	},
@@ -10,6 +11,8 @@
 		"dev": "vite dev",
 		"build": "vite build",
 		"preview": "vite preview",
+		"electron:dev": "ELECTRON_BUILD=true vite build && electron .",
+		"electron:build": "ELECTRON_BUILD=true vite build && electron-builder",
 		"prepare": "svelte-kit sync || echo '' && npm run assets:generate",
 		"check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
 		"check:watch": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json --watch",
@@ -34,6 +37,8 @@
 		"@types/node": "^24",
 		"drizzle-kit": "^0.31.10",
 		"drizzle-orm": "^0.45.2",
+		"electron": "^38.8.6",
+		"electron-builder": "^26.15.3",
 		"eslint": "^10.4.1",
 		"eslint-config-prettier": "^10.1.8",
 		"eslint-plugin-svelte": "^3.19.0",
@@ -72,5 +77,28 @@
 		"sass": "^1.102.0",
 		"smui-theme": "^9.0.1",
 		"vite-plugin-pwa": "^1.3.0"
+	},
+	"build": {
+		"appId": "com.brianramsey.ev-charging-log",
+		"productName": "EV Charging Log",
+		"directories": {
+			"output": "release"
+		},
+		"files": [
+			"build/**/*",
+			"drizzle/**/*",
+			"static/**/*",
+			"electron/**/*",
+			"package.json",
+			"node_modules/**/*"
+		],
+		"mac": {
+			"target": [
+				"dmg",
+				"zip"
+			],
+			"category": "public.app-category.utilities",
+			"identity": null
+		}
 	}
 }

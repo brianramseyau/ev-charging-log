@@ -26,6 +26,9 @@ Thumbs.db
 vite.config.js.timestamp-*
 vite.config.ts.timestamp-*
 
+# electron-builder output
+/release
+
 # Personal data — this repo is intended to go public eventually.
 # Never commit real spreadsheets, exports, or the live database:
 # they contain name, vehicle rego, addresses, and charging history.

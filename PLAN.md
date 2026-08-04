@@ -220,6 +220,111 @@ ev-charging-log/
 - **Export template file**: the real `Record of Home Charging July 2026.xlsx` contains personal data (name, rego, home address) and is gitignored — it must never be committed. Before phase 3, create a **sanitized version** of the template (same layout/formatting, placeholder values) to check into `static/templates/` so the export feature has something to build/test against in the repo.
 - Confirm target Unraid PUID/PGID values (typically `99`/`100` for the default Unraid `nobody`/`users`, but check your setup) when writing the template defaults.
 
+## 11. Electron desktop distribution (optional, alongside Docker)
+
+Feasibility check for also shipping this as a desktop app via Electron, for
+personal convenience — **not** a replacement for the Docker/Unraid deployment,
+which remains the primary always-on install. Single-user, unsigned build to
+start (no other distribution target), macOS-first since that's the daily
+driver.
+
+### 11.1 Architecture
+
+The app is not a static SPA — `+page.server.ts` load functions/actions talk
+to `better-sqlite3` directly, stream generated `.xlsx` files, and run
+migrations on boot (`src/hooks.server.ts` → `src/lib/server/db/index.ts`).
+So "Electron app" means: bundle the existing `adapter-node` production build
+(`build/index.js`) and run it as a local server, with an Electron
+`BrowserWindow` pointed at it — not a rewrite to a client-only build.
+
+```text
+electron/
+  main.cjs     -- Electron main process
+```
+
+`main.cjs` responsibilities, in order:
+
+1. Resolve a per-OS writable data path via `app.getPath('userData')` and set
+   `DATABASE_URL` to `<userData>/ev-charging-log.db` before the server starts
+   (mirrors what `DATABASE_URL` does today for Docker's `/data` volume).
+2. Pick a free local port, set `PORT` and `HOST=127.0.0.1`.
+3. `fork()` `build/index.js` as a child process using Electron's own
+   executable in Node mode (`ELECTRON_RUN_AS_NODE=1`), rather than shelling
+   out to a system Node — keeps the packaged app self-contained with no
+   external Node dependency.
+4. Wait for the child to signal it's listening (poll or an IPC ready message),
+   then create the `BrowserWindow` and load `http://127.0.0.1:<port>`.
+5. On app quit, kill the child process; on macOS, standard
+   `window-all-closed`/`activate` lifecycle handling.
+
+Migrations-on-boot need no changes — same `hooks.server.ts` import path,
+regardless of who spawns the process.
+
+### 11.2 Changes needed to existing config
+
+- **`vite.config.ts`**: skip the `SvelteKitPWA` plugin when building for
+  Electron (e.g. gate on an `ELECTRON_BUILD` env var). The PWA service worker
+  is meant for a real HTTPS origin; inside a `localhost`-loaded `BrowserWindow`
+  it's redundant at best and a source of stale-asset bugs at worst.
+- **`package.json`**: add `electron`, `electron-builder` as devDependencies;
+  add `electron:dev` (build + launch Electron against it) and
+  `electron:build` (package via `electron-builder`) scripts.
+- **electron-builder config** (`package.json` `"build"` key or
+  `electron-builder.yml`): `mac` target only to start (`dmg`/`zip`), app id
+  reverse-DNS style (e.g. `com.<user>.ev-charging-log`), files list including
+  `build/`, `drizzle/`, `static/`, `electron/`, and `node_modules` pruned to
+  production deps.
+
+### 11.3 The one real technical wrinkle: `better-sqlite3`
+
+`better-sqlite3` is a native module — its compiled `.node` binary must match
+the exact Node ABI of the runtime loading it. Electron ships its own Node
+build with its own ABI (not the system Node's), so:
+
+- **Local dev/packaging**: `electron-builder` runs an npm rebuild step for
+  native dependencies against Electron's ABI automatically before packaging
+  (equivalent to what `@electron/rebuild` does standalone) — no manual step
+  needed in the common case, but worth confirming this happens as part of
+  `electron:build` the first time it's wired up, same way the Dockerfile
+  already documents its own `better-sqlite3` handling (`npm rebuild
+  better-sqlite3` after `--ignore-scripts` install).
+- This is a per-OS/per-arch concern (mac x64 + arm64 at minimum) — same
+  category of problem the Dockerfile already solves for `arm64 musl`, just
+  for a different runtime target.
+
+### 11.4 CI / release automation (not built yet — future work)
+
+Not part of the initial scaffold, but the shape for when it's wanted:
+
+- `electron-builder` has built-in GitHub Releases publishing
+  (`electron-builder --publish always`), so a single workflow run can build
+  and attach artifacts to a release.
+- GitHub Actions workflow triggered on `push: tags: 'v*'`, matrix across
+  target OSes as platforms are added (native module rebuilds need to run on
+  the real OS — no cross-compiling the native bits from one runner).
+- Versioning: bump `package.json` `version`, tag `vX.Y.Z`, push tag →
+  workflow builds and publishes a draft/full GitHub Release with the packaged
+  artifact(s) attached.
+- Signing/notarization deliberately out of scope for now (single-user,
+  unsigned build accepted per §11 intro) — revisit if this is ever shared
+  beyond personal use. Would need `CSC_LINK`/`CSC_KEY_PASSWORD` +
+  `APPLE_ID`/`APPLE_APP_SPECIFIC_PASSWORD`/`APPLE_TEAM_ID` secrets for mac
+  notarization, `WIN_CSC_LINK`/`WIN_CSC_KEY_PASSWORD` for Windows, at that
+  point.
+
+### 11.5 Open items
+
+- Confirm whether the Electron build should read/write the *same* SQLite
+  file as an existing Docker deployment (e.g. via a shared network mount) or
+  intentionally keep a separate local dataset — affects whether
+  `userData`-relative `DATABASE_URL` is correct or whether it should be
+  user-configurable.
+- Windows/Linux targets: add later if actually needed; not part of the
+  initial (mac-only) scaffold.
+- Auto-update (`electron-updater` against the GitHub Releases feed): worth
+  adding once release automation (§11.5) exists, skip for the first
+  hand-built version.
+
 ## Ongoing: Enhancements
 
 [x] Enhancement: Home address is almost always the same, in the settings (/settings) allow a user to add their home address. This should then pre-populate the home address into the Location field in sessions (/sessions)

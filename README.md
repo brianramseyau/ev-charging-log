@@ -14,14 +14,14 @@ See [PLAN.md](PLAN.md) for the full project plan, data model, and build phases.
 
 ### Desktop
 
-| Dashboard | Billing period detail |
-| --- | --- |
+| Dashboard                                                                          | Billing period detail                                                                              |
+| ---------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------- |
 | <img src="docs/images/dashboard-desktop.png" width="420" alt="Dashboard, desktop"> | <img src="docs/images/period-detail-desktop.png" width="420" alt="Billing period detail, desktop"> |
 
 ### Mobile
 
-| Dashboard | Billing period detail |
-| --- | --- |
+| Dashboard                                                                        | Billing period detail                                                                            |
+| -------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------ |
 | <img src="docs/images/dashboard-mobile.png" width="220" alt="Dashboard, mobile"> | <img src="docs/images/period-detail-mobile.png" width="220" alt="Billing period detail, mobile"> |
 
 ## Features
@@ -43,6 +43,8 @@ See [PLAN.md](PLAN.md) for the full project plan, data model, and build phases.
 - **exceljs** for spreadsheet import/export.
 - **Vitest** for testing calculation logic.
 - Deployed via **Docker** (PUID/PGID-aware) to a home Unraid server.
+- Optional **Electron** desktop build (macOS, unsigned) for personal use
+  alongside the Docker deployment.
 
 ## Developing
 
@@ -79,6 +81,34 @@ linuxserver.io-style `PUID`/`PGID` entrypoint (see `docker/entrypoint.sh`) so
 files written to the mounted `/data` volume end up owned by the right user —
 no docker-compose needed. On Unraid, use the template at
 [unraid/ev-charging-log.xml](unraid/ev-charging-log.xml).
+
+## Desktop app (Electron)
+
+For personal convenience, the same app can also run as a self-contained macOS
+desktop app instead of (or alongside) the Docker deployment — see
+[PLAN.md §11](PLAN.md#11-electron-desktop-distribution-optional-alongside-docker)
+for the full design. It bundles the production `adapter-node` build and runs
+it as a local child process, with an Electron window pointed at
+`http://127.0.0.1:<port>`; the SQLite database lives under the OS's per-app
+data directory (`~/Library/Application Support/ev-charging-log` on macOS)
+rather than a Docker volume.
+
+Run it in dev mode (rebuilds first, then launches Electron against that
+build):
+
+```sh
+npm run electron:dev
+```
+
+Package a distributable `.dmg`/`.zip` with `electron-builder`:
+
+```sh
+npm run electron:build
+```
+
+Output lands in `release/`. This is a single-user, unsigned, macOS-only build
+for now — no auto-update, no Windows/Linux target, no code signing/
+notarization (see PLAN.md §11.5 for what's intentionally left out).
 
 ## Status
 

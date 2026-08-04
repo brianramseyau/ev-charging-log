@@ -14,8 +14,12 @@
 
 	let { children } = $props();
 
-	if (browser) {
-		import('virtual:pwa-register/svelte').then(({ useRegisterSW }) => useRegisterSW());
+	if (browser && !__ELECTRON_BUILD__) {
+		// The virtual module only exists when SvelteKitPWA is registered (skipped for
+		// Electron builds, see vite.config.ts) — @vite-ignore keeps the bundler from
+		// trying to statically resolve it in that case.
+		const pwaRegisterModule = 'virtual:pwa-register/svelte';
+		import(/* @vite-ignore */ pwaRegisterModule).then(({ useRegisterSW }) => useRegisterSW());
 	}
 
 	const navItems = [
