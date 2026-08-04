@@ -2,7 +2,6 @@
 	import { enhance } from '$app/forms';
 	import Button, { Label } from '@smui/button';
 	import Card from '@smui/card';
-	import DataTable, { Head, Body, Row, Cell } from '@smui/data-table';
 	import type { ActionData, PageData } from './$types';
 
 	let { data, form }: { data: PageData; form: ActionData } = $props();
@@ -108,30 +107,20 @@
 	{#if data.homeSessions.length === 0}
 		<p class="empty">No home sessions logged in this period.</p>
 	{:else}
-		<div class="table-scroll">
-			<DataTable table$aria-label="Home charging sessions" style="width: 100%;">
-				<Head>
-					<Row>
-						<Cell>Date</Cell>
-						<Cell>Time</Cell>
-						<Cell numeric>Odometer</Cell>
-						<Cell numeric>kWh</Cell>
-						<Cell>Location</Cell>
-					</Row>
-				</Head>
-				<Body>
-					{#each data.homeSessions as s (s.id)}
-						<Row>
-							<Cell>{s.date}</Cell>
-							<Cell>{s.time}</Cell>
-							<Cell numeric>{s.odometerKm.toLocaleString()}</Cell>
-							<Cell numeric>{s.kwhUsed.toFixed(2)}</Cell>
-							<Cell class="location-cell">{s.location}</Cell>
-						</Row>
-					{/each}
-				</Body>
-			</DataTable>
-		</div>
+		<ul class="session-list">
+			{#each data.homeSessions as s (s.id)}
+				<li class="session-row">
+					<div class="session-row__top">
+						<span class="session-row__datetime">{s.date} · {s.time}</span>
+					</div>
+					<div class="session-row__details">
+						<span>{s.odometerKm.toLocaleString()} km</span>
+						<span>{s.kwhUsed.toFixed(2)} kWh</span>
+						<span class="session-row__location">{s.location}</span>
+					</div>
+				</li>
+			{/each}
+		</ul>
 	{/if}
 </section>
 
@@ -140,30 +129,20 @@
 	{#if data.publicSessions.length === 0}
 		<p class="empty">No public sessions logged in this period.</p>
 	{:else}
-		<div class="table-scroll">
-			<DataTable table$aria-label="Public charging sessions" style="width: 100%;">
-				<Head>
-					<Row>
-						<Cell>Date</Cell>
-						<Cell>Time</Cell>
-						<Cell numeric>Odometer</Cell>
-						<Cell numeric>kWh</Cell>
-						<Cell>Location</Cell>
-					</Row>
-				</Head>
-				<Body>
-					{#each data.publicSessions as s (s.id)}
-						<Row>
-							<Cell>{s.date}</Cell>
-							<Cell>{s.time}</Cell>
-							<Cell numeric>{s.odometerKm.toLocaleString()}</Cell>
-							<Cell numeric>{s.kwhUsed.toFixed(2)}</Cell>
-							<Cell class="location-cell">{s.location}</Cell>
-						</Row>
-					{/each}
-				</Body>
-			</DataTable>
-		</div>
+		<ul class="session-list">
+			{#each data.publicSessions as s (s.id)}
+				<li class="session-row">
+					<div class="session-row__top">
+						<span class="session-row__datetime">{s.date} · {s.time}</span>
+					</div>
+					<div class="session-row__details">
+						<span>{s.odometerKm.toLocaleString()} km</span>
+						<span>{s.kwhUsed.toFixed(2)} kWh</span>
+						<span class="session-row__location">{s.location}</span>
+					</div>
+				</li>
+			{/each}
+		</ul>
 	{/if}
 </section>
 
@@ -272,18 +251,48 @@
 		margin: 0 0 0.6rem;
 	}
 
-	.table-scroll {
-		overflow-x: auto;
-	}
-
-	:global(.location-cell) {
-		white-space: normal !important;
-		word-break: break-word;
-	}
-
 	.empty {
 		color: #64748b;
 		font-size: 0.9rem;
+	}
+
+	.session-list {
+		list-style: none;
+		margin: 0;
+		padding: 0;
+		display: flex;
+		flex-direction: column;
+		gap: 0.6rem;
+	}
+
+	.session-row {
+		border: 1px solid rgba(0, 0, 0, 0.1);
+		border-radius: 10px;
+		padding: 0.65rem 0.9rem;
+	}
+
+	.session-row__top {
+		display: flex;
+		align-items: center;
+		gap: 0.6rem;
+	}
+
+	.session-row__datetime {
+		font-weight: 600;
+		font-size: 0.9rem;
+	}
+
+	.session-row__details {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 0.4rem 0.9rem;
+		font-size: 0.85rem;
+		margin-top: 0.35rem;
+		color: #334155;
+	}
+
+	.session-row__location {
+		word-break: break-word;
 	}
 
 	@media (prefers-color-scheme: dark) {
@@ -291,6 +300,14 @@
 		.summary-label,
 		.empty {
 			color: #94a3b8;
+		}
+
+		.session-row {
+			border-color: rgba(255, 255, 255, 0.12);
+		}
+
+		.session-row__details {
+			color: #cbd5e1;
 		}
 	}
 </style>
