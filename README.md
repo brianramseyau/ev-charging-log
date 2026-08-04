@@ -121,6 +121,11 @@ since native module rebuilds (`better-sqlite3`) need to happen on the real
 target platform. No code signing/notarization for any of them (see
 PLAN.md §11.5).
 
+Packaged builds check GitHub Releases for a newer version on launch and
+prompt to download/install it (via `electron-updater`, reading the same
+`publish` config used to publish releases) — nothing to configure, it's a
+no-op when running unpackaged (`electron:dev`).
+
 ## Status
 
 Core features are built: session logging, rate plans (flat + peak/off-peak),

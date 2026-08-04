@@ -2,6 +2,7 @@
 // production build (build/index.js) as a local child process, then points a
 // BrowserWindow at it — see PLAN.md §11 for the full rationale.
 const { app, BrowserWindow } = require('electron');
+const { autoUpdater } = require('electron-updater');
 const { fork } = require('node:child_process');
 const net = require('node:net');
 const path = require('node:path');
@@ -117,6 +118,14 @@ app.whenReady().then(async () => {
 			createWindow(serverPort);
 		}
 	});
+
+	// Reads GitHub Releases via the `publish` config electron-builder bakes
+	// into app-update.yml at package time — no-op in dev (unpackaged) builds.
+	if (app.isPackaged) {
+		autoUpdater.checkForUpdatesAndNotify().catch((err) => {
+			console.error('Auto-update check failed:', err);
+		});
+	}
 });
 
 app.on('window-all-closed', () => {

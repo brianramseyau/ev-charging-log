@@ -75,6 +75,7 @@
 		"@smui/top-app-bar": "^9.0.1",
 		"@vite-pwa/sveltekit": "^1.1.0",
 		"better-sqlite3": "^13.0.2",
+		"electron-updater": "^6.8.9",
 		"exceljs": "^4.4.0",
 		"sass": "^1.102.0",
 		"smui-theme": "^9.0.1",
