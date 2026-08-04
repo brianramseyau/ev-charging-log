@@ -78,6 +78,15 @@
 	<p class="form-error">{form.error}</p>
 {/if}
 
+{#if data.draftSessions.length > 0}
+	<p class="draft-warning">
+		{data.draftSessions.length}
+		{data.draftSessions.length === 1 ? 'draft session is' : 'draft sessions are'} missing kWh — complete
+		{data.draftSessions.length === 1 ? 'it' : 'them'} on the
+		<a href="/sessions">Sessions page</a> before submitting this period.
+	</p>
+{/if}
+
 <form method="POST" action={data.period.submittedAt ? '?/unsubmit' : '?/submit'} use:enhance>
 	<Button variant="outlined" class="submit-toggle-button" style="width: 100%">
 		<Label>{data.period.submittedAt ? 'Unsubmit period' : 'Mark as submitted'}</Label>
@@ -272,6 +281,20 @@
 		margin: 0 0 0.75rem;
 	}
 
+	.draft-warning {
+		background: #fef3c7;
+		color: #92400e;
+		border-radius: 8px;
+		padding: 0.65rem 0.85rem;
+		font-size: 0.85rem;
+		margin: 0 0 1rem;
+	}
+
+	.draft-warning a {
+		color: inherit;
+		font-weight: 600;
+	}
+
 	:global(.delete-button) {
 		width: 100%;
 		margin-bottom: 1.5rem;
@@ -349,6 +372,11 @@
 		.summary-label,
 		.empty {
 			color: #94a3b8;
+		}
+
+		.draft-warning {
+			background: #78350f;
+			color: #fde68a;
 		}
 
 		.session-row {

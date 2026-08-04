@@ -19,16 +19,20 @@ export const load: PageServerLoad = async () => {
 		db.select().from(billingPeriods)
 	]);
 
-	const sessions: DashboardSession[] = sessionRows.map((row) => ({
-		id: row.id,
-		kind: row.kind,
-		date: row.date,
-		time: row.time,
-		odometerKm: row.odometerKm,
-		kwhUsed: row.kwhUsed,
-		cost: row.cost,
-		billingPeriodId: row.billingPeriodId
-	}));
+	// Drafts have no kWh/cost yet, so they're excluded until completed rather
+	// than skewing efficiency, cost, and split figures with incomplete data.
+	const sessions: DashboardSession[] = sessionRows
+		.filter((row) => !row.isDraft)
+		.map((row) => ({
+			id: row.id,
+			kind: row.kind,
+			date: row.date,
+			time: row.time,
+			odometerKm: row.odometerKm,
+			kwhUsed: row.kwhUsed ?? 0,
+			cost: row.cost,
+			billingPeriodId: row.billingPeriodId
+		}));
 
 	const periods: DashboardPeriod[] = periodRows.map((row) => ({
 		id: row.id,

@@ -35,8 +35,12 @@ export const chargingSessions = sqliteTable('charging_sessions', {
 	date: text('date').notNull(),
 	time: text('time').notNull(),
 	odometerKm: real('odometer_km').notNull(),
-	kwhUsed: real('kwh_used').notNull(),
+	// Null while the session is a draft — kWh isn't known until charging finishes.
+	kwhUsed: real('kwh_used'),
 	location: text('location').notNull(),
 	cost: real('cost'), // computed at save time from the active rate plan (home sessions)
-	notes: text('notes')
+	notes: text('notes'),
+	// A draft records the bits known when plugging in (date/time/odometer/location)
+	// before kWh used is known; it's completed later by filling in kwhUsed.
+	isDraft: integer('is_draft', { mode: 'boolean' }).notNull().default(false)
 });
