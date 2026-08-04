@@ -118,6 +118,7 @@ describe('computeKpis', () => {
 			lifetimeHomeKwh: 0,
 			lifetimeCost: 0,
 			avgEfficiency: null,
+			avgKwhPer100Km: null,
 			avgCostPerKwh: null,
 			avgCostPerKm: null,
 			currentPeriod: null
@@ -138,6 +139,7 @@ describe('computeKpis', () => {
 		expect(kpis.lifetimeHomeKwh).toBe(30);
 		expect(kpis.lifetimeCost).toBe(9);
 		expect(kpis.avgEfficiency).toBe(10);
+		expect(kpis.avgKwhPer100Km).toBe(10);
 		expect(kpis.avgCostPerKwh).toBe(0.3);
 		expect(kpis.avgCostPerKm).toBeCloseTo(0.03);
 		expect(kpis.currentPeriod).toBeNull();
