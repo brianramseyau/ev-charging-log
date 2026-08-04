@@ -224,9 +224,9 @@ ev-charging-log/
 
 Feasibility check for also shipping this as a desktop app via Electron, for
 personal convenience — **not** a replacement for the Docker/Unraid deployment,
-which remains the primary always-on install. Single-user, unsigned build to
-start (no other distribution target), macOS-first since that's the daily
-driver.
+which remains the primary always-on install. Single-user, unsigned build,
+macOS-first since that's the daily driver but packaged for Windows and Linux
+too (§11.5).
 
 ### 11.1 Architecture
 
@@ -298,16 +298,17 @@ build with its own ABI (not the system Node's), so:
 app on every `vX.Y.Z` tag push (mirrors the trigger `docker-publish.yml`
 already uses for the Docker image):
 
-- Runs on `macos-latest` (native module rebuilds need to happen on the real
-  OS — no cross-compiling the native bits from one runner). Add OS entries to
-  the job matrix if/when Windows/Linux targets are added (§11.5).
+- Runs on a matrix of `macos-latest`, `windows-latest`, and `ubuntu-latest`
+  (native module rebuilds need to happen on the real target OS — no
+  cross-compiling the native bits from one runner), one job per platform.
 - `npm run electron:build -- --publish always` — `electron-builder`'s
   built-in GitHub Releases publishing, using the workflow's own
   `GITHUB_TOKEN` (needs `permissions: contents: write`) rather than a
   separate PAT.
 - `package.json`'s `build.publish` is set to `{ "provider": "github" }`;
-  `build.mac.arch` lists both `x64` and `arm64` so a single tag push produces
-  artifacts for both Mac architectures.
+  each platform's `target` entries carry their own `arch` list — mac ships
+  `x64` + `arm64`, Windows and Linux ship `x64` — so a single tag push
+  produces artifacts for all three platforms.
 - Versioning: bump `package.json` `version`, tag `vX.Y.Z`, push tag →
   workflow builds and publishes a draft GitHub Release (electron-builder's
   default `releaseType`) with the packaged artifact(s) attached; publish the
@@ -320,18 +321,20 @@ already uses for the Docker image):
   notarization, `WIN_CSC_LINK`/`WIN_CSC_KEY_PASSWORD` for Windows, at that
   point.
 
-### 11.5 Open items
+### 11.5 Resolved decisions
 
-- Confirm whether the Electron build should read/write the *same* SQLite
-  file as an existing Docker deployment (e.g. via a shared network mount) or
-  intentionally keep a separate local dataset — affects whether
-  `userData`-relative `DATABASE_URL` is correct or whether it should be
-  user-configurable.
-- Windows/Linux targets: add later if actually needed; not part of the
-  initial (mac-only) scaffold.
-- Auto-update (`electron-updater` against the GitHub Releases feed): worth
-  adding once release automation (§11.5) exists, skip for the first
-  hand-built version.
+- **Database location**: defaults to a `userData`-relative SQLite file,
+  intentionally separate from a Docker deployment's dataset. Made
+  user-configurable via a `config.json` `databasePath` key in the app's
+  `userData` directory, for anyone who wants the desktop build to read/write
+  the same file (e.g. shared over a network mount) instead — see
+  `electron/main.cjs`'s `resolveDatabasePath`.
+- **Windows/Linux targets**: added — NSIS (`.exe`) for Windows, `AppImage`
+  for Linux, both `x64` only. §11.4's CI matrix builds and publishes all
+  three platforms per tag push.
+- **Auto-update**: `electron-updater` checks GitHub Releases on launch (via
+  the same `publish` config used to publish releases) and is a no-op when
+  running unpackaged (`electron:dev`).
 
 ## Ongoing: Enhancements
 
