@@ -49,7 +49,8 @@ export default defineConfig({
 				globPatterns: ['**/*.{js,css,html,png,svg,webmanifest}']
 			},
 			devOptions: {
-				enabled: true
+				enabled: true,
+				suppressWarnings: true
 			}
 		})
 	],
