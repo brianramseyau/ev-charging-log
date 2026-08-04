@@ -70,7 +70,7 @@
 		<Content>
 			<p class="kpi-label">Avg cost per km</p>
 			<p class="kpi-value">
-				{data.kpis.avgCostPerKm != null ? `${(data.kpis.avgCostPerKm * 100).toFixed(1)}¢` : '—'}
+				{data.kpis.avgCostPerKm != null ? `${(data.kpis.avgCostPerKm * 100).toFixed(2)}¢` : '—'}
 			</p>
 			{#if costPerKmDeltaCents != null}
 				<p
@@ -78,7 +78,7 @@
 					class:kpi-good={costPerKmDeltaCents > 0}
 					class:kpi-bad={costPerKmDeltaCents <= 0}
 				>
-					{costPerKmDeltaCents <= 0 ? '−' : '+'}{Math.abs(costPerKmDeltaCents).toFixed(1)}¢ vs {(
+					{costPerKmDeltaCents <= 0 ? '−' : '+'}{Math.abs(costPerKmDeltaCents).toFixed(2)}¢ vs {(
 						GOVERNMENT_RATE_PER_KM * 100
 					).toFixed(2)}¢ govt rate
 				</p>
