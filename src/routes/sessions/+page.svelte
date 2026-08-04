@@ -27,6 +27,10 @@
 
 	let submitting = $state(false);
 
+	const PAGE_SIZE = 5;
+	let visibleCount = $state(PAGE_SIZE);
+	const visibleSessions = $derived(data.sessions.slice(0, visibleCount));
+
 	// Pre-populate Location with the saved home address whenever the user switches
 	// to a home session, but only if they haven't already typed something in.
 	$effect(() => {
@@ -223,7 +227,7 @@
 	<p class="empty-state">No sessions logged yet.</p>
 {:else}
 	<ul class="session-list">
-		{#each data.sessions as session (session.id)}
+		{#each visibleSessions as session (session.id)}
 			<li class="session-row">
 				<div class="session-row__top">
 					<span class="badge" class:badge--home={session.kind === 'home'}>
@@ -265,6 +269,15 @@
 			</li>
 		{/each}
 	</ul>
+	{#if visibleCount < data.sessions.length}
+		<Button
+			variant="outlined"
+			style="width: 100%; margin-top: 0.75rem"
+			onclick={() => (visibleCount += PAGE_SIZE)}
+		>
+			<Label>Load more</Label>
+		</Button>
+	{/if}
 {/if}
 
 <style>
