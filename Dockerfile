@@ -36,6 +36,7 @@ ENV TZ=Etc/UTC
 COPY --from=prod-deps /app/node_modules ./node_modules
 COPY --from=build /app/build ./build
 COPY --from=build /app/drizzle ./drizzle
+COPY --from=build /app/static ./static
 COPY --from=build /app/package.json ./package.json
 COPY docker/entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
