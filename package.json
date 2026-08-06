@@ -1,7 +1,7 @@
 {
 	"name": "ev-charging-log",
 	"private": true,
-	"version": "0.1.1",
+	"version": "0.1.2",
 	"description": "Self-hosted EV charging session log, cost tracking, and lease billing reports.",
 	"author": "Brian Ramsey",
 	"type": "module",
@@ -89,7 +89,9 @@
 			"output": "release",
 			"buildResources": "electron/resources"
 		},
-		"asarUnpack": ["**/*.node"],
+		"asarUnpack": [
+			"**/*.node"
+		],
 		"files": [
 			"build/**/*",
 			"drizzle/**/*",
