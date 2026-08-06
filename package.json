@@ -89,6 +89,7 @@
 			"output": "release",
 			"buildResources": "electron/resources"
 		},
+		"asarUnpack": ["**/*.node"],
 		"files": [
 			"build/**/*",
 			"drizzle/**/*",

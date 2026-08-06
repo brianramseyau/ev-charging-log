@@ -52,10 +52,14 @@ function getFreePort() {
 
 // build/index.js doesn't emit a ready signal, so poll the port until it accepts
 // connections instead of relying on an IPC message.
-function waitForServer(port, timeoutMs = 15000) {
+function waitForServer(port, timeoutMs, hasExited) {
 	const deadline = Date.now() + timeoutMs;
 	return new Promise((resolve, reject) => {
 		const tryConnect = () => {
+			if (hasExited()) {
+				reject(new Error('Server process exited before it started listening'));
+				return;
+			}
 			const socket = net.createConnection({ port, host: '127.0.0.1' }, () => {
 				socket.end();
 				resolve();
@@ -88,17 +92,33 @@ async function startServer() {
 			PORT: String(port),
 			HOST: '127.0.0.1'
 		},
-		stdio: 'inherit'
+		// Piped (rather than 'inherit') so output is captured here — a GUI
+		// launch has no terminal to inherit into, so this was the only way to
+		// see why the server failed to start.
+		stdio: ['ignore', 'pipe', 'pipe', 'ipc']
 	});
 
+	let output = '';
+	const captureOutput = (chunk) => {
+		output += chunk.toString();
+	};
+	serverProcess.stdout.on('data', captureOutput);
+	serverProcess.stderr.on('data', captureOutput);
+
+	let exited = false;
 	serverProcess.on('exit', (code, signal) => {
+		exited = true;
 		serverProcess = null;
 		if (code !== 0 && code !== null) {
 			console.error(`Server process exited unexpectedly (code=${code}, signal=${signal})`);
 		}
 	});
 
-	await waitForServer(port);
+	try {
+		await waitForServer(port, 15000, () => exited);
+	} catch (err) {
+		throw new Error(`${err.message}${output ? `\n\nServer output:\n${output}` : ''}`);
+	}
 	return port;
 }
 
