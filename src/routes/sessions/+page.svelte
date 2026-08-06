@@ -5,8 +5,8 @@
 	import Card, { Content } from '@smui/card';
 	import IconButton from '@smui/icon-button';
 	import Textfield from '@smui/textfield';
-	import TextfieldIcon from '@smui/textfield/icon';
-	import { mdiClose, mdiDeleteOutline, mdiHome, mdiEvStation } from '@mdi/js';
+	import { mdiDeleteOutline, mdiHome, mdiEvStation } from '@mdi/js';
+	import AddressField from '$lib/components/AddressField.svelte';
 	import DateTimeField from '$lib/components/DateTimeField.svelte';
 	import Icon from '$lib/components/Icon.svelte';
 	import type { ActionData, PageData } from './$types';
@@ -213,28 +213,13 @@
 			</div>
 
 			<div class="field-row">
-				<Textfield
-					variant="outlined"
+				<AddressField
 					label="Location"
 					bind:value={location}
-					input$name="location"
+					name="location"
 					required
-					style="width: 100%"
 					invalid={!!errors.location}
-				>
-					{#snippet trailingIcon()}
-						<TextfieldIcon
-							role="button"
-							tabindex={location ? 0 : -1}
-							class="clear-location-icon"
-							style={location ? undefined : 'visibility: hidden'}
-							aria-label="Clear location"
-							onclick={() => (location = '')}
-						>
-							<Icon path={mdiClose} size={18} />
-						</TextfieldIcon>
-					{/snippet}
-				</Textfield>
+				/>
 				{#if errors.location}<p class="field-error">{errors.location}</p>{/if}
 			</div>
 
@@ -432,10 +417,6 @@
 
 	.kind-toggle input {
 		margin: 0;
-	}
-
-	:global(.clear-location-icon) {
-		cursor: pointer;
 	}
 
 	.field-error {

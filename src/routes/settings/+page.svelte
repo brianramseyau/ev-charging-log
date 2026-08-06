@@ -2,6 +2,7 @@
 	import Card, { Content } from '@smui/card';
 	import Textfield from '@smui/textfield';
 	import Button, { Label } from '@smui/button';
+	import AddressField from '$lib/components/AddressField.svelte';
 	import type { PageData, ActionData } from './$types';
 
 	let { data, form }: { data: PageData; form: ActionData } = $props();
@@ -41,13 +42,7 @@
 				input$name="vehicleLabel"
 				style="width: 100%"
 			/>
-			<Textfield
-				variant="outlined"
-				label="Home address (optional)"
-				bind:value={homeAddress}
-				input$name="homeAddress"
-				style="width: 100%"
-			/>
+			<AddressField label="Home address (optional)" bind:value={homeAddress} name="homeAddress" />
 
 			<Button variant="raised" type="submit" style="width: 100%">
 				<Label>Save</Label>
