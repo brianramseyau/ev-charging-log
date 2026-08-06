@@ -84,16 +84,19 @@ async function startServer() {
 	// ELECTRON_RUN_AS_NODE makes Electron's own bundled executable behave as a
 	// plain Node runtime, so the packaged app has no external Node dependency.
 	serverProcess = fork(path.join(__dirname, '..', 'build', 'index.js'), [], {
-		// Drizzle's migrator resolves `migrationsFolder` against cwd, not
-		// against the module's own location — without this, the forked
-		// process inherits Electron's cwd (often "/" when launched from
-		// Finder) instead of the directory containing build/ and drizzle/.
-		cwd: path.join(__dirname, '..'),
 		env: {
 			...process.env,
 			ELECTRON_RUN_AS_NODE: '1',
 			NODE_ENV: 'production',
 			DATABASE_URL: dbPath,
+			// drizzle's migrator resolves this against cwd by default, which
+			// would be Electron's own cwd (often "/" when launched from
+			// Finder) since fork()'s `cwd` option can't be set to a path
+			// inside app.asar — that's a real OS chdir, and asar is a virtual
+			// archive, not a real directory. Passing an absolute path instead
+			// works fine, since ordinary fs reads (unlike chdir/spawn) are
+			// transparently patched to work inside asar.
+			MIGRATIONS_FOLDER: path.join(__dirname, '..', 'drizzle'),
 			PORT: String(port),
 			HOST: '127.0.0.1'
 		},
@@ -143,35 +146,38 @@ function createWindow(port) {
 	});
 }
 
-app.whenReady().then(async () => {
-	// On macOS, BrowserWindow's `icon` option doesn't affect the Dock icon —
-	// only relevant in dev, since packaged builds already get it from the
-	// .icns/Info.plist.
-	if (process.platform === 'darwin' && !app.isPackaged && app.dock) {
-		app.dock.setIcon(path.join(__dirname, 'resources', 'icon.png'));
-	}
-
-	serverPort = await startServer();
-	createWindow(serverPort);
-
-	app.on('activate', () => {
-		if (mainWindow === null && serverPort !== null) {
-			createWindow(serverPort);
+app
+	.whenReady()
+	.then(async () => {
+		// On macOS, BrowserWindow's `icon` option doesn't affect the Dock icon —
+		// only relevant in dev, since packaged builds already get it from the
+		// .icns/Info.plist.
+		if (process.platform === 'darwin' && !app.isPackaged && app.dock) {
+			app.dock.setIcon(path.join(__dirname, 'resources', 'icon.png'));
 		}
-	});
 
-	// Reads GitHub Releases via the `publish` config electron-builder bakes
-	// into app-update.yml at package time — no-op in dev (unpackaged) builds.
-	if (app.isPackaged) {
-		autoUpdater.checkForUpdatesAndNotify().catch((err) => {
-			console.error('Auto-update check failed:', err);
+		serverPort = await startServer();
+		createWindow(serverPort);
+
+		app.on('activate', () => {
+			if (mainWindow === null && serverPort !== null) {
+				createWindow(serverPort);
+			}
 		});
-	}
-}).catch((err) => {
-	console.error('Failed to start:', err);
-	dialog.showErrorBox('EV Charging Log failed to start', err.stack || String(err));
-	app.quit();
-});
+
+		// Reads GitHub Releases via the `publish` config electron-builder bakes
+		// into app-update.yml at package time — no-op in dev (unpackaged) builds.
+		if (app.isPackaged) {
+			autoUpdater.checkForUpdatesAndNotify().catch((err) => {
+				console.error('Auto-update check failed:', err);
+			});
+		}
+	})
+	.catch((err) => {
+		console.error('Failed to start:', err);
+		dialog.showErrorBox('EV Charging Log failed to start', err.stack || String(err));
+		app.quit();
+	});
 
 app.on('window-all-closed', () => {
 	if (process.platform !== 'darwin') {
