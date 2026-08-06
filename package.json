@@ -1,7 +1,7 @@
 {
 	"name": "ev-charging-log",
 	"private": true,
-	"version": "0.1.0",
+	"version": "0.1.1",
 	"description": "Self-hosted EV charging session log, cost tracking, and lease billing reports.",
 	"author": "Brian Ramsey",
 	"type": "module",
