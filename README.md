@@ -139,17 +139,6 @@ dashboard, and settings — all mobile-first with SMUI, running as a PWA. See
 [PLAN.md](PLAN.md) for the original design and remaining open items (§10),
 such as confirming real peak/off-peak rates once you're on that plan.
 
-## Prompts
-
-Prompts used to drive notable changes via Claude Code, kept for reference.
-
-- "Fix: For a mobile-first app, the Periods view page is very unfriendly with
-  excessing x-scroll. Rework this area to be far more mobile friendly, this is
-  already achieved in the Sessions history relatively well (though has less
-  data it needs to show)." — reworked the period detail page's home/public
-  session tables from horizontally-scrolling `DataTable`s into stacked cards
-  matching the Sessions history list.
-
 ## A note on privacy
 
 This project handles personal data (vehicle details, home address, charging
