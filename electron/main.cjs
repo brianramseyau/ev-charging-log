@@ -84,6 +84,11 @@ async function startServer() {
 	// ELECTRON_RUN_AS_NODE makes Electron's own bundled executable behave as a
 	// plain Node runtime, so the packaged app has no external Node dependency.
 	serverProcess = fork(path.join(__dirname, '..', 'build', 'index.js'), [], {
+		// Drizzle's migrator resolves `migrationsFolder` against cwd, not
+		// against the module's own location — without this, the forked
+		// process inherits Electron's cwd (often "/" when launched from
+		// Finder) instead of the directory containing build/ and drizzle/.
+		cwd: path.join(__dirname, '..'),
 		env: {
 			...process.env,
 			ELECTRON_RUN_AS_NODE: '1',
