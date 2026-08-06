@@ -98,7 +98,11 @@ async function startServer() {
 			// transparently patched to work inside asar.
 			MIGRATIONS_FOLDER: path.join(__dirname, '..', 'drizzle'),
 			PORT: String(port),
-			HOST: '127.0.0.1'
+			HOST: '127.0.0.1',
+			// adapter-node's CSRF check rejects form actions unless it knows its
+			// own origin — without this it can't tell, since there's no reverse
+			// proxy here to supply Host/X-Forwarded-* headers.
+			ORIGIN: `http://127.0.0.1:${port}`
 		},
 		// Piped (rather than 'inherit') so output is captured here — a GUI
 		// launch has no terminal to inherit into, so this was the only way to
