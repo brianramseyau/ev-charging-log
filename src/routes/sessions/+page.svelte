@@ -15,12 +15,30 @@
 
 	const homeAddress = $derived(data.homeAddress ?? '');
 
+	// Formats a Date into the local (not UTC) values the native date/time
+	// inputs expect, so a session logged just before midnight doesn't get
+	// shifted to the wrong day.
+	function currentDate() {
+		const now = new Date();
+		const yyyy = now.getFullYear();
+		const mm = String(now.getMonth() + 1).padStart(2, '0');
+		const dd = String(now.getDate()).padStart(2, '0');
+		return `${yyyy}-${mm}-${dd}`;
+	}
+
+	function currentTime() {
+		const now = new Date();
+		const hh = String(now.getHours()).padStart(2, '0');
+		const min = String(now.getMinutes()).padStart(2, '0');
+		return `${hh}:${min}`;
+	}
+
 	// Local state for the add-session form. Re-seeded from the last submission's
 	// values whenever a validation failure comes back, so the user doesn't have
 	// to retype everything.
 	let kind = $state<'home' | 'public'>('home');
-	let date = $state('');
-	let time = $state('');
+	let date = $state(currentDate());
+	let time = $state(currentTime());
 	let odometerKm = $state('');
 	let kwhUsed = $state('');
 	let location = $state(untrack(() => data.homeAddress) ?? '');
@@ -69,8 +87,8 @@
 
 	function resetForm() {
 		kind = 'home';
-		date = '';
-		time = '';
+		date = currentDate();
+		time = currentTime();
 		odometerKm = '';
 		kwhUsed = '';
 		location = homeAddress;
