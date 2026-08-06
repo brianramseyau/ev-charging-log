@@ -1,7 +1,7 @@
 // Electron main process for the desktop build. Boots the existing adapter-node
 // production build (build/index.js) as a local child process, then points a
 // BrowserWindow at it — see PLAN.md §11 for the full rationale.
-const { app, BrowserWindow } = require('electron');
+const { app, BrowserWindow, dialog } = require('electron');
 const { autoUpdater } = require('electron-updater');
 const { fork } = require('node:child_process');
 const net = require('node:net');
@@ -142,6 +142,10 @@ app.whenReady().then(async () => {
 			console.error('Auto-update check failed:', err);
 		});
 	}
+}).catch((err) => {
+	console.error('Failed to start:', err);
+	dialog.showErrorBox('EV Charging Log failed to start', err.stack || String(err));
+	app.quit();
 });
 
 app.on('window-all-closed', () => {
