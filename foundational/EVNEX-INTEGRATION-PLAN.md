@@ -25,20 +25,23 @@ charger knows into draft sessions, and leave the user to add the odometer.
 These were settled before drafting and are not open for re-litigation by the
 implementing agent:
 
-| #   | Decision                                                                                                                                                                                                                                                                                                                                                                                        |
-| --- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 1   | **Odometer becomes nullable, but only the Evnex flow may omit it.** Manual session creation still requires it. A session missing an odometer is an incomplete draft: it cannot be exported, and it blocks period submission — same treatment as a session missing kWh.                                                                                                                          |
-| 2   | **Polling writes draft sessions straight to the database**, keyed by the Evnex session ID. A later poll finds the same ID and fills in kWh once charging has finished. It does not pre-fill the Add form.                                                                                                                                                                                       |
-| 3   | **Credentials are OAuth2 client-credentials, supplied by environment.** `EVNEX_CLIENT_ID` and `EVNEX_CLIENT_SECRET` (Evnex **Enterprise** account, found under "My Organisation" in CP-Link) are read from the environment and never stored in the database or entered in the UI. They are exchanged for a 24-hour access token, which _is_ persisted and re-minted on expiry. See §4 and §5.6. |
-| 4   | **Written against today's architecture** — `+page.server.ts` loads and form actions, pure logic in `src/lib/server/`. See [§11](#11-relationship-to-offline-modeplanmd) for what changes if the offline-mode refactor lands first. The two plans are independent and may be built in either order.                                                                                              |
+| #   | Decision                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| --- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1   | **Odometer becomes nullable, but only the Evnex flow may omit it.** Manual session creation still requires it. A session missing an odometer is an incomplete draft: it cannot be exported, and it blocks period submission — same treatment as a session missing kWh.                                                                                                                                                                                            |
+| 2   | **Polling writes draft sessions straight to the database**, keyed by the Evnex session ID. A later poll finds the same ID and fills in kWh once charging has finished. It does not pre-fill the Add form.                                                                                                                                                                                                                                                         |
+| 3   | **Credentials are OAuth2 client-credentials, never stored in the database.** From an Evnex **Enterprise** account ("My Organisation" in CP-Link). Server deployments read `EVNEX_CLIENT_ID` / `EVNEX_CLIENT_SECRET` from the environment; the Electron build lets the user type them into `/settings`, persisted to `config.json` in `userData`. They are exchanged for a 24-hour access token, which _is_ persisted and re-minted on expiry. See §4, §5.6, §5.7. |
+| 4   | **Written against today's architecture** — `+page.server.ts` loads and form actions, pure logic in `src/lib/server/`. See [§11](#11-relationship-to-offline-modeplanmd) for what changes if the offline-mode refactor lands first. The two plans are independent and may be built in either order.                                                                                                                                                                |
 
 ## 3. What the user does, end to end
 
-1. Sets `EVNEX_CLIENT_ID` and `EVNEX_CLIENT_SECRET` in the environment — `.env`
-   locally, the Unraid template's variable fields in production (§5.6) — and
-   restarts the app.
+1. Supplies credentials, which differs by deployment:
+   - **Server build** — sets `EVNEX_CLIENT_ID` and `EVNEX_CLIENT_SECRET` in the
+     environment (`.env` locally, the Unraid template's variable fields in
+     production, §5.6) and restarts the app.
+   - **Desktop build** — types them into `/settings`, where they are saved to
+     `config.json` in `userData` (§5.7). No restart.
 2. Opens `/settings`, finds a new **Evnex integration** heading below the
-   existing name/vehicle card, showing **Credentials found in environment**.
+   existing name/vehicle card.
 3. Taps **Test connection**. The app authenticates, lists the charge points on
    the account, and the user picks theirs.
 4. Optionally adjusts **Import sessions from the last N days** (default 3),
@@ -185,7 +188,7 @@ export const evnexIntegration = sqliteTable('evnex_integration', {
 	id: integer('id').primaryKey({ autoIncrement: true }),
 
 	// User-entered, via /settings. Credentials are deliberately absent — they
-	// come from the environment (§5.6) and are never written to the database.
+	// come from the environment or config.json (§5.6) and are never written here.
 	chargePointId: text('charge_point_id'), // UUID of the home charger
 	chargePointName: text('charge_point_name'), // cached for display
 	chargePointTimeZone: text('charge_point_time_zone'), // IANA, cached; see §6.3
@@ -357,18 +360,41 @@ the dismissed session on the next poll. Do not add one.
 Regardless, the generated SQL must be **read before committing**, to confirm
 the `INSERT … SELECT` carries every column and existing rows survive the copy.
 
-### 5.6 Configuration: credentials come from the environment
+### 5.6 Configuration: two credential sources
+
+Credentials never go in the database. They come from one of two places,
+depending on how the app is deployed:
+
+| Deployment           | Source                                    | Entered how                      |
+| -------------------- | ----------------------------------------- | -------------------------------- |
+| Server (Docker etc.) | `EVNEX_CLIENT_ID` / `EVNEX_CLIENT_SECRET` | Environment, set by the operator |
+| Desktop (Electron)   | `<userData>/config.json`                  | The `/settings` UI (§5.7)        |
+
+A single resolver in `src/lib/server/evnex-config.ts` answers "what are the
+credentials?" for both, **environment first**:
+
+```ts
+export interface EvnexCredentials {
+	clientId: string;
+	clientSecret: string;
+}
+
+/** Null when either half is missing or blank — an expected state, not an error. */
+export function resolveEvnexCredentials(): EvnexCredentials | null;
+```
+
+Environment wins so that a container's explicit operator configuration cannot
+be silently overridden by a stale file, and so the desktop build behaves
+predictably if someone does set both.
+
+#### From the environment
 
 ```sh
 EVNEX_CLIENT_ID=…
 EVNEX_CLIENT_SECRET=…
 ```
 
-Both use the `EVNEX_` prefix. Neither is written to the database, rendered in
-any page, or entered through the UI, which means the secret never reaches a
-database backup and `/settings` has nothing to redact.
-
-Read them through `$env/dynamic/private`, matching `DATABASE_URL` in
+Read through `$env/dynamic/private`, matching `DATABASE_URL` in
 `src/lib/server/db/index.ts`. **Dynamic, not static** — the Docker image is
 built once and configured at run time, so a build-time binding would freeze
 whatever was set in the builder. Being dynamic also means the Dockerfile needs
@@ -388,17 +414,72 @@ never stop the app from starting.
 | `docker/entrypoint.sh`       | Nothing. It `exec`s the app, so the environment passes through.                                                                                                                                                              |
 | `unraid/ev-charging-log.xml` | Two `<Config … Type="Variable">` entries alongside the existing `PUID`/`PGID`, `Required="false"`. Set **`Mask="true"`** on the secret so Unraid renders it as a password field instead of plain text on the container page. |
 
-#### The Electron build has no obvious place for these
+### 5.7 The desktop build: `config.json` in `userData`
 
-PLAN.md §11 packages the app for desktop, where a user cannot readily set
-environment variables. PLAN.md §11.5 already solved the equivalent problem for
-the database path with a `config.json` in the app's `userData` directory, and
-the same mechanism is the natural home for these two values.
+A desktop user cannot reasonably set environment variables, so the Electron
+build lets them type the credentials into `/settings` and persists them to the
+`config.json` that `electron/main.cjs` already maintains in `userData` — the
+same file and mechanism used today for `databasePath`:
 
-Until that is done, the integration is simply unavailable in the desktop build
-— which is acceptable, since polling a home charger is home-wifi work that the
-server deployment covers. Flagging it so it is a recorded gap rather than a
-surprise bug report.
+```json
+{
+	"databasePath": "/path/to/db",
+	"evnexClientId": "…",
+	"evnexClientSecret": "…"
+}
+```
+
+#### How the server finds the file
+
+`electron/main.cjs` already computes `<userData>/config.json` inside
+`resolveDatabasePath` (line 27) and already injects environment into the forked
+server (the `fork` `env` block at line 87). Add one variable there:
+
+```js
+CONFIG_PATH: path.join(app.getPath('userData'), 'config.json'),
+```
+
+Hoist the path out of `resolveDatabasePath` so both uses share one expression
+rather than rebuilding it. Unprefixed naming matches the existing
+`MIGRATIONS_FOLDER` / `DATABASE_URL` convention.
+
+**`CONFIG_PATH` being set is the signal that this deployment has a writable
+credential store.** The server does not need to know it is running under
+Electron, and nothing needs to sniff `ELECTRON_RUN_AS_NODE`. When `CONFIG_PATH`
+is unset — every server deployment — the config file source simply does not
+exist and `/settings` shows no credential fields (§7.1).
+
+#### Reading
+
+`resolveEvnexCredentials` reads and parses `CONFIG_PATH` **per call, not cached
+at boot**. Credentials entered in the UI must work immediately; caching would
+mean a restart, and the user has no obvious reason to suspect one is needed.
+The file is a few hundred bytes and a poll is a manual, human-paced action, so
+re-reading it costs nothing worth optimising.
+
+Parse failures are non-fatal: log and fall through to "no credentials", exactly
+as `resolveDatabasePath` already does for a corrupt file.
+
+#### Writing — merge, never overwrite
+
+`?/saveEvnex` writes the two keys back. Three requirements, all of which are
+easy to get wrong and expensive when wrong:
+
+1. **Read-modify-write.** `databasePath` lives in this file. Serialising a
+   fresh `{ evnexClientId, evnexClientSecret }` over the top would drop it, and
+   the next launch would silently open a _different database_ at the default
+   path — the user's entire history apparently gone. Preserve unknown keys too.
+2. **Write atomically**: write a sibling temp file, `fsync`, then `rename` over
+   the target. A crash or a full disk mid-write must not leave a truncated
+   `config.json`, for the same reason.
+3. **`chmod 0600`.** The secret is plaintext at rest, so it should at least not
+   be world-readable on a shared machine.
+
+Plaintext at rest is accepted here for the same reasons as the rest of this
+app's data: `userData` is a per-user directory, this is a single-user desktop
+app, and the same directory already holds the charging history itself. It is
+worth noting that this is a genuine step down from the server deployment, where
+the secret lives only in the operator's environment.
 
 ---
 
@@ -406,13 +487,19 @@ surprise bug report.
 
 ### 6.1 Layering
 
-Per the convention in CLAUDE.md, split three ways:
+Per the convention in CLAUDE.md, split four ways:
 
 | File                                  | Responsibility                                                                                                                                  | Tested                                                  |
 | ------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------- |
 | `src/lib/server/evnex.ts`             | **Pure.** Window arithmetic, timezone conversion, payload → draft mapping, insert/update/skip planning, token expiry. No `fetch`, no db import. | Vitest, `evnex.test.ts`                                 |
-| `src/lib/server/evnex-client.ts`      | The only place that calls `fetch`. Auth exchange, charge-point fetch, session listing, pagination, error mapping.                               | Not unit tested (the Vitest project is pure logic only) |
+| `src/lib/server/evnex-config.ts`      | Credential resolution across environment and `config.json` (§5.6, §5.7), and the atomic merge-write. Touches `fs` and env, never the db.        | Vitest for the pure merge/precedence helpers            |
+| `src/lib/server/evnex-client.ts`      | The only place that calls `fetch`. Auth exchange, charge-point fetch, session listing, error mapping.                                           | Not unit tested (the Vitest project is pure logic only) |
 | `src/routes/sessions/+page.server.ts` | New `?/pollEvnex` action wiring db + client + pure logic.                                                                                       | Playwright                                              |
+
+`evnex-config.ts` does I/O, so it does not belong in `evnex.ts`. Keep the parts
+that _are_ pure — precedence between the two sources, and merging new keys into
+an existing config object — as exported functions taking plain arguments, so
+the rules in §5.7 can be tested without touching a filesystem.
 
 ### 6.2 The lookback window
 
@@ -628,10 +715,11 @@ imported at all is §12.4.
 
 The action, in order:
 
-1. Read `EVNEX_CLIENT_ID` / `EVNEX_CLIENT_SECRET` (§5.6) and load the
-   integration row. `fail(400)` if either credential is missing, the charge
-   point is unset, or the integration is switched off — with a message naming
-   which, since the two failures have completely different fixes.
+1. Call `resolveEvnexCredentials()` (§5.6) and load the integration row.
+   `fail(400)` if credentials are missing, the charge point is unset, or the
+   integration is switched off — with a message naming which, since the fixes
+   are completely different, and for credentials the fix differs again by
+   deployment (§7.1).
 2. Ensure a valid token — reuse `accessToken` when
    `!isTokenExpired(accessTokenExpiresAt, new Date())` (60s clock skew),
    otherwise mint a new one (§4.2) and persist it with
@@ -684,8 +772,7 @@ session as already dismissed.
 
 A second `<Card>` below the existing one, with its own `?/saveEvnex` action.
 
-Credentials are **not** on this page — they come from the environment (§5.6).
-What remains is the genuinely user-chosen configuration:
+Always present, regardless of deployment:
 
 | Field                         | Control                                    | Notes                                                                 |
 | ----------------------------- | ------------------------------------------ | --------------------------------------------------------------------- |
@@ -693,23 +780,41 @@ What remains is the genuinely user-chosen configuration:
 | Import sessions from the last | `Textfield` `type="number"`, suffix "days" | Default 3, min 1                                                      |
 | Enabled                       | `Switch`                                   | Gates the poll button                                                 |
 
-Above them, a read-only credential status derived from whether both environment
-variables are non-empty:
+#### Credentials: the section that changes shape
 
-- **Credentials found in environment** — proceed to **Test connection**.
-- **No credentials configured** — name `EVNEX_CLIENT_ID` and
-  `EVNEX_CLIENT_SECRET` and say they are set in the environment and need a
-  restart. Someone hitting this has no other way to discover what is wrong, so
-  the message must be specific rather than a generic "not configured".
+`load` returns a `credentialSource` of `'env' | 'file' | 'none'`, derived from
+whether `EVNEX_CLIENT_ID`/`EVNEX_CLIENT_SECRET` are set and whether
+`CONFIG_PATH` is set (§5.6, §5.7). The card renders one of three things:
+
+- **`'env'`** — read-only: _"Credentials supplied by the environment."_ No
+  input fields. Editing them from the UI would mean writing somewhere the
+  environment does not read from, which cannot work.
+- **`'file'`** (desktop) — **Client ID** and **Client secret** `Textfield`s,
+  the secret as `type="password"`, saved to `config.json` by `?/saveEvnex`.
+- **`'none'`** (server, unconfigured) — no fields, and a message naming
+  `EVNEX_CLIENT_ID` and `EVNEX_CLIENT_SECRET`, stating they are set in the
+  environment and need a restart. Someone hitting this has no other way to
+  discover what is wrong, so it must be specific rather than a generic "not
+  configured".
 
 Plus a **Test connection** button and a status line: _"Connected to
 'Home charger' · last polled 2 hours ago"_, or the last error.
 
-**Send booleans, never values.** `load` may return `hasCredentials: boolean`
-and must not return the client ID or secret — not even the ID, and not even
-partially masked. The env-var design removes the write-only-field problem
-entirely; the remaining risk is re-introducing it by "helpfully" displaying
-which client ID is in use.
+#### The secret is write-only, in every deployment
+
+`load` must never return the client secret, and must not return the client ID
+either — not even partially masked. It returns `credentialSource` and a
+`hasCredentials: boolean`, nothing more. "Helpfully" showing which client ID is
+in use is the obvious way this leaks.
+
+For the `'file'` case the field therefore behaves as write-only: it renders
+with a `••••••••` placeholder when credentials already exist, and **an empty
+submitted secret means "leave unchanged", not "clear it"**. A separate explicit
+**Clear credentials** action removes both keys from `config.json`, so wiping
+them stays possible without making a blank save destructive.
+
+Validate that client ID and secret are either both present or both absent — a
+half-saved pair produces a 401 whose cause is not obvious from the error.
 
 The same applies to `lastPollError` (§5.1): it is rendered on this page, so
 whatever `evnex-client.ts` puts there must be a summarised message plus the
@@ -912,6 +1017,15 @@ configured test project:
   while failing.
 - The Wh → kWh conversion, including a session whose `meterStop` is absent.
 - `isTokenExpired` including the clock-skew margin.
+
+**Vitest** — `src/lib/server/evnex-config.test.ts`, for the pure helpers in
+§5.6/§5.7:
+
+- Environment wins over file when both are present.
+- Either half missing or blank resolves to `null`, not a half-populated pair.
+- **Merging preserves `databasePath`** and any unknown keys. This is the test
+  that stands between a save and pointing the desktop app at the wrong
+  database.
 - The existing `sessions.test.ts`, `dashboard.test.ts` and `report.test.ts`
   must be **extended** with null-odometer cases, not just kept passing — they
   are the regression net for §8.
@@ -922,6 +1036,10 @@ light and dark**:
 - `/settings` with the new heading — SMUI `Select` and `Switch` are new
   controls on this page and MDC's resets have caused real regressions here
   before.
+- `/settings` in all three `credentialSource` states (§7.1), since the card
+  renders different controls in each. The `'file'` variant is reachable in a
+  normal dev server by setting `CONFIG_PATH` to a temp file — no Electron
+  build required to exercise it.
 - `/sessions` poll button in both disabled (unconfigured) and enabled states.
 - A draft row showing both **Add kWh** and **Add odometer**.
 - The §7.4 chip: a manual row and an imported row **in the same screenshot**,
@@ -948,14 +1066,14 @@ either suite above and has to be done deliberately:
 
 Each phase lands green (`npm run check`, `npm run lint`, `npm run test`).
 
-| #   | Phase                                                                            | Notes                                                                                                                                                                                                                        |
-| --- | -------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 1   | Nullable odometer + the §8 ripple + the §5.5 foreign-key fix                     | No Evnex code at all. Largest phase; ships a coherent "drafts can be missing an odometer" capability on its own.                                                                                                             |
-| 2   | Schema: `evnex_integration`, `evnex_dismissed_sessions`, `external_id`           | Migration only, plus the tombstone write in `?/delete`.                                                                                                                                                                      |
-| 3   | `evnex.ts` pure logic + full Vitest suite                                        | No network, no UI.                                                                                                                                                                                                           |
-| 4   | `evnex-client.ts` + §5.6 config surfaces + `/settings` section + Test connection | First real API contact. Verify §4.3 (bare token, no `Bearer`) against the live API before building on it. Land `.env.example` and the Unraid variables here, not in phase 6 — the feature cannot be configured without them. |
-| 5   | Poll button + `?/pollEvnex`                                                      | The payoff.                                                                                                                                                                                                                  |
-| 6   | Playwright verification + §13 documentation updates                              |                                                                                                                                                                                                                              |
+| #   | Phase                                                                                                     | Notes                                                                                                                                                                                                                                                                                                                                                                             |
+| --- | --------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1   | Nullable odometer + the §8 ripple + the §5.5 foreign-key fix                                              | No Evnex code at all. Largest phase; ships a coherent "drafts can be missing an odometer" capability on its own.                                                                                                                                                                                                                                                                  |
+| 2   | Schema: `evnex_integration`, `evnex_dismissed_sessions`, `external_id`                                    | Migration only, plus the tombstone write in `?/delete`.                                                                                                                                                                                                                                                                                                                           |
+| 3   | `evnex.ts` pure logic + full Vitest suite                                                                 | No network, no UI.                                                                                                                                                                                                                                                                                                                                                                |
+| 4   | `evnex-config.ts` + `evnex-client.ts` + §5.6/§5.7 config surfaces + `/settings` section + Test connection | First real API contact. Verify §4.3 (bare token, no `Bearer`) against the live API before building on it. Land `.env.example`, the Unraid variables and the `main.cjs` `CONFIG_PATH` change here, not in phase 6 — the feature cannot be configured without them. Exercise the desktop path in a **packaged** build, not just `electron:dev`: `userData` differs between the two. |
+| 5   | Poll button + `?/pollEvnex`                                                                               | The payoff.                                                                                                                                                                                                                                                                                                                                                                       |
+| 6   | Playwright verification + §13 documentation updates                                                       |                                                                                                                                                                                                                                                                                                                                                                                   |
 
 No phase is blocked on outstanding questions; the API contract in §4 is
 confirmed. Phase 4 is the first to need real credentials.
@@ -1011,7 +1129,15 @@ Owed once this lands:
 - **`unraid/ev-charging-log.xml`** — two `Type="Variable"` entries, the secret
   with `Mask="true"`.
 - **README.md** — whatever setup section covers `DATABASE_URL` should mention
-  these, including that they require an Evnex Enterprise account (§12.5).
+  these, including that they require an Evnex Enterprise account (§12.5). The
+  existing "Desktop app (Electron)" section, which documents `config.json` and
+  `databasePath`, gains the two credential keys and a note that they are
+  normally set through `/settings` rather than by hand.
+- **PLAN.md §11.5** — the resolved-decisions entry describes `config.json` as
+  holding `databasePath`; it now also holds Evnex credentials, written by the
+  app rather than only read by it.
+- **`electron/main.cjs`** — the comment above `resolveDatabasePath` (line 23)
+  documents the file's shape and should list the new keys.
 - **CLAUDE.md "Commands"** — the migrations-on-boot paragraph should record
   that foreign keys are disabled around `migrate()` and restored afterwards,
   and why (§5.5). Anyone who later "tidies up" that pragma would reintroduce
