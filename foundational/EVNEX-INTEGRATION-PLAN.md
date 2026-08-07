@@ -43,8 +43,9 @@ implementing agent:
 4. Saves. The integration is now configured.
 5. On `/sessions`, a **Pull from charger** button is now enabled. Tapping it
    imports recent sessions as drafts.
-6. Each imported draft shows in the history list with a **From charger** badge
-   and an **Add odometer** field. Filling it in completes the session.
+6. Each imported draft shows in the history list with a green
+   **Home - Imported** chip (§7.4) and an **Add odometer** field. Filling it in
+   completes the session.
 
 ---
 
@@ -622,27 +623,124 @@ odometer, and the row offers whichever fields are missing.
 
 - `?/complete` accepts both `kwhUsed` and `odometerKm`, requiring only the ones
   actually missing. A session leaves draft state when both are set.
-- Imported sessions get a **From charger** badge alongside the existing
-  **Draft** badge.
 - The existing `isOdometerBelowLastRecorded` soft warning applies when the
   odometer is added.
+- Provenance is shown by the chip in §7.4.
+
+### 7.4 The "Home - Imported" chip
+
+Imported rows must be visually distinguishable from hand-logged ones at a
+glance. The existing row markup (`sessions/+page.svelte:272`) renders a kind
+badge and, when incomplete, a draft badge:
+
+```svelte
+<span class="badge" class:badge--home={session.kind === 'home'}>
+	{session.kind === 'home' ? 'Home' : 'Public'}
+</span>
+{#if session.kwhUsed == null}
+	<span class="badge badge--draft">Draft</span>
+{/if}
+```
+
+**Replace the kind badge for imported rows rather than adding a third one.**
+Every imported session is `kind: 'home'` (§6.4), so a separate provenance badge
+would render `HOME` `IMPORTED` `DRAFT` — three uppercase pills competing for
+space on a mobile-first row. One chip reading **`HOME - IMPORTED`** carries both
+facts:
+
+```svelte
+<span
+	class="badge"
+	class:badge--home={session.kind === 'home' && session.externalId == null}
+	class:badge--imported={session.externalId != null}
+>
+	{session.externalId != null ? 'Home - Imported' : session.kind === 'home' ? 'Home' : 'Public'}
+</span>
+```
+
+`session.externalId != null` is the provenance test, per §12.2. The `load` in
+`sessions/+page.server.ts` must therefore include `externalId` in the row
+projection.
+
+#### Colour
+
+Green, for the Evnex brand, added as a token alongside the existing two in
+`src/routes/+layout.svelte:67-68` so it follows the established convention
+rather than hardcoding:
+
+```css
+--charge-home-color: #3987e5;
+--charge-public-color: #d95926;
+--charge-imported-color: #15803d; /* Evnex green — see the contrast note */
+```
+
+The badge then reuses the existing `color-mix` treatment verbatim:
+
+```css
+.badge--imported {
+	background: color-mix(in srgb, var(--charge-imported-color) 15%, white);
+	color: var(--charge-imported-color);
+}
+
+/* in the existing prefers-color-scheme: dark block */
+.badge--imported {
+	background: color-mix(in srgb, var(--charge-imported-color) 25%, black);
+	color: #fff;
+}
+```
+
+> **Do not substitute a bright or lime green.** Light mode puts the colour
+> itself on a 15%-on-white tint of the same colour, which bright greens fail
+> badly. Measured against that exact treatment, with the shipped home blue as
+> the baseline:
+>
+> | Colour              | Light      | Dark    |
+> | ------------------- | ---------- | ------- |
+> | `#3987e5` home blue | 3.07:1     | 16.10:1 |
+> | `#d95926` public    | 3.22:1     | 16.42:1 |
+> | `#15803d` deep      | **4.09:1** | 17.21:1 |
+> | `#4caf50` grass     | 2.42:1     | 15.06:1 |
+> | `#7ac943` lime      | **1.84:1** | 13.77:1 |
+> | `#4ade80` mint      | **1.59:1** | 13.10:1 |
+>
+> A lime chip would be roughly half as legible as everything already shipping.
+> Dark mode is unaffected — white on a 25%-on-black tint clears 13:1 for any of
+> them — so this is a light-mode constraint only.
+
+I could not confirm Evnex's exact brand hex (their documentation host is
+blocked by this environment's egress policy, §4 note). `#15803d` is a
+placeholder chosen to satisfy the constraint above. If the real brand green is
+a brighter lime, keep it for the **dark-mode** tint and as an accent, and use a
+darkened variant for the light-mode foreground — do not use one bright value
+for both.
+
+Two smaller notes:
+
+- `HOME - IMPORTED` is roughly twice the width of `HOME`, and `.badge` is
+  uppercase at `font-weight: 700`. Check it does not push the date/time or the
+  delete button onto a second line at 320px.
+- The offline-mode plan proposes green `#4ade80` for its app-bar cloud
+  indicator. Different surface, and the two are never adjacent, but it is worth
+  knowing green will then carry two unrelated meanings in the app.
 
 ---
 
 ## 8. Ripple from a nullable odometer
 
-`odometerKm` is non-null in five modules today. Every one needs revisiting —
+`odometerKm` is non-null across the app today. Every reader needs revisiting —
 this is the largest single chunk of work in the plan and is why §10 puts it in
 its own phase.
 
-| File                                        | Change                                                                                                                                                                                                                                  |
-| ------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `src/lib/server/sessions.ts`                | `SessionRow.odometerKm` → `number \| null`. `mostRecentOdometer` returns the most recent **non-null** reading. `withEfficiency`: efficiency is null when either this session's or the immediately-preceding session's odometer is null. |
-| `src/lib/dashboard.ts`                      | Same rule for cost-per-km and km/kWh; sessions with a null odometer are excluded from distance maths.                                                                                                                                   |
-| `src/lib/server/report.ts`                  | Type as `number \| null`; write a blank cell defensively. In practice never reached — §8.1 blocks the export first.                                                                                                                     |
-| `src/routes/periods/[id]/+page.server.ts`   | `draftSessions` is currently `kwhUsed == null`; becomes `kwhUsed == null \|\| odometerKm == null`. The `?/submit` guard message extends to name whichever is missing.                                                                   |
-| `src/routes/periods/[id]/export/+server.ts` | The `completedSessions` filter gains the same odometer condition.                                                                                                                                                                       |
-| `src/routes/sessions/+page.server.ts`       | `?/create` unchanged (odometer still required). `?/complete` extended per §7.3. `?/delete` writes a tombstone per §5.2.                                                                                                                 |
+| File                                        | Change                                                                                                                                                                                                                                                                                                                                     |
+| ------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `src/lib/server/sessions.ts`                | `SessionRow.odometerKm` → `number \| null`. `mostRecentOdometer` returns the most recent **non-null** reading. `withEfficiency`: efficiency is null when either this session's or the immediately-preceding session's odometer is null.                                                                                                    |
+| `src/lib/dashboard.ts`                      | Same rule for cost-per-km and km/kWh; sessions with a null odometer are excluded from distance maths.                                                                                                                                                                                                                                      |
+| `src/lib/server/report.ts`                  | Type as `number \| null`; write a blank cell defensively. In practice never reached — §8.1 blocks the export first.                                                                                                                                                                                                                        |
+| `src/routes/periods/[id]/+page.server.ts`   | `draftSessions` is currently `kwhUsed == null`; becomes `kwhUsed == null \|\| odometerKm == null`. The completed `homeSessions`/`publicSessions` filters must take the exact inverse — a session with kWh but no odometer currently lands in the completed lists. The `?/submit` guard message extends to name whichever field is missing. |
+| `src/routes/periods/[id]/+page.svelte`      | Lines 143 and 181 render `s.odometerKm.toLocaleString()` unguarded. These are the completed home/public lists, so they are safe **only** if the filter above is fixed in the same change. Add a conditional render anyway — the crash is silent until a real null reaches it.                                                              |
+| `src/routes/periods/[id]/export/+server.ts` | The `completedSessions` filter gains the same odometer condition.                                                                                                                                                                                                                                                                          |
+| `src/routes/sessions/+page.server.ts`       | `?/create` unchanged (odometer still required). `?/complete` extended per §7.3. `?/delete` writes a tombstone per §5.2. `load` must project `externalId` for the §7.4 chip.                                                                                                                                                                |
+| `src/routes/sessions/+page.svelte`          | **Throws today.** Line 289 renders `{session.odometerKm.toLocaleString()} km` unguarded — a null odometer is a `TypeError` that blanks the whole history list, not a cosmetic gap. Render the km figure conditionally, as the kWh figure two lines below it already is.                                                                    |
 
 ### 8.1 Why not skip the efficiency changes
 
@@ -693,6 +791,12 @@ light and dark**:
   before.
 - `/sessions` poll button in both disabled (unconfigured) and enabled states.
 - A draft row showing both **Add kWh** and **Add odometer**.
+- The §7.4 chip: a manual row and an imported row **in the same screenshot**,
+  so the colours are compared side by side rather than across two images. The
+  whole point of the chip is telling them apart at a glance, and light mode is
+  where the green is at risk.
+- A history list containing a null-odometer row, confirming it renders rather
+  than throwing (§8) — this is the failure that blanks the entire list.
 
 The Evnex API itself is not contacted in tests; `evnex-client.ts` is stubbed.
 
