@@ -1,6 +1,6 @@
 # Evnex Integration — Design & Implementation Plan
 
-Status: **scoped, API contract confirmed, not yet started**
+Status: **scoped, targeting the consumer Cloud API (§4), not yet started**
 Branch: `claude/evnex-integration-plan-tu7pxt`
 
 Extends [PLAN.md](PLAN.md) §4 (data model) and the "Ongoing: Enhancements"
@@ -25,30 +25,27 @@ charger knows into draft sessions, and leave the user to add the odometer.
 These were settled before drafting and are not open for re-litigation by the
 implementing agent:
 
-| #   | Decision                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
-| --- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 1   | **Odometer becomes nullable, but only the Evnex flow may omit it.** Manual session creation still requires it. A session missing an odometer is an incomplete draft: it cannot be exported, and it blocks period submission — same treatment as a session missing kWh.                                                                                                                                                                                            |
-| 2   | **Polling writes draft sessions straight to the database**, keyed by the Evnex session ID. A later poll finds the same ID and fills in kWh once charging has finished. It does not pre-fill the Add form.                                                                                                                                                                                                                                                         |
-| 3   | **Credentials are OAuth2 client-credentials, never stored in the database.** From an Evnex **Enterprise** account ("My Organisation" in CP-Link). Server deployments read `EVNEX_CLIENT_ID` / `EVNEX_CLIENT_SECRET` from the environment; the Electron build lets the user type them into `/settings`, persisted to `config.json` in `userData`. They are exchanged for a 24-hour access token, which _is_ persisted and re-minted on expiry. See §4, §5.6, §5.7. |
-| 4   | **Written against today's architecture** — `+page.server.ts` loads and form actions, pure logic in `src/lib/server/`. See [§11](#11-relationship-to-offline-modeplanmd) for what changes if the offline-mode refactor lands first. The two plans are independent and may be built in either order.                                                                                                                                                                |
+| #   | Decision                                                                                                                                                                                                                                                                                                                                                                    |
+| --- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1   | **Odometer becomes nullable, but only the Evnex flow may omit it.** Manual session creation still requires it. A session missing an odometer is an incomplete draft: it cannot be exported, and it blocks period submission — same treatment as a session missing kWh.                                                                                                      |
+| 2   | **Polling writes draft sessions straight to the database**, keyed by the Evnex session ID. A later poll finds the same ID and fills in kWh once charging has finished. It does not pre-fill the Add form.                                                                                                                                                                   |
+| 3   | **The consumer Cloud API, not the Enterprise one.** Cognito email/password against `client-api.evnex.io`, so an ordinary Evnex account works and no Enterprise tier is needed. The password is entered in `/settings`, used once, and never stored; the resulting token set is persisted and refreshed. Same mechanism on every deployment, desktop included. See §4, §5.6. |
+| 4   | **Written against today's architecture** — `+page.server.ts` loads and form actions, pure logic in `src/lib/server/`. See [§11](#11-relationship-to-offline-modeplanmd) for what changes if the offline-mode refactor lands first. The two plans are independent and may be built in either order.                                                                          |
 
 ## 3. What the user does, end to end
 
-1. Supplies credentials, which differs by deployment:
-   - **Server build** — sets `EVNEX_CLIENT_ID` and `EVNEX_CLIENT_SECRET` in the
-     environment (`.env` locally, the Unraid template's variable fields in
-     production, §5.6) and restarts the app.
-   - **Desktop build** — types them into `/settings`, where they are saved to
-     `config.json` in `userData` (§5.7). No restart.
-2. Opens `/settings`, finds a new **Evnex integration** heading below the
-   existing name/vehicle card.
-3. Taps **Test connection**. The app authenticates, lists the charge points on
-   the account, and the user picks theirs.
-4. Optionally adjusts **Import sessions from the last N days** (default 3),
+1. Opens `/settings`, finds a new **Evnex integration** heading below the
+   existing name/vehicle card, and enters their Evnex email and password —
+   the same ones they use in the Evnex app. If the account has TOTP enabled, a
+   6-digit code is requested next.
+2. The app signs in, discards the password, stores the token set, and lists the
+   charge points on the account. The user picks theirs. No restart, and the
+   desktop build behaves identically (§5.6).
+3. Optionally adjusts **Import sessions from the last N days** (default 3),
    switches the integration on, and saves.
-5. On `/sessions`, a **Pull from charger** button is now enabled. Tapping it
+4. On `/sessions`, a **Pull from charger** button is now enabled. Tapping it
    imports recent sessions as drafts.
-6. Each imported draft shows in the history list with a green
+5. Each imported draft shows in the history list with a green
    **Home - Imported** chip (§7.4) and an **Add odometer** field. Filling it in
    completes the session.
 
@@ -56,103 +53,135 @@ implementing agent:
 
 ## 4. API contract
 
-Confirmed against the Evnex reference documentation (`Authorization`,
-`GetChargePoint`, `ListChargePointSessions`). Full index at
-`https://docs.evnex.com/llms.txt`.
+This targets the **consumer Cloud API** — the one the Evnex mobile app uses,
+reachable with an ordinary Evnex account. It is _not_ the Enterprise API
+documented at `docs.evnex.com`, which needs a paid tier the project does not
+have.
 
-### 4.1 Two hosts
+### 4.0 This API is unofficial — accept the consequences deliberately
 
-Authentication and the API live on **different hosts** — a detail easy to miss
-and productive of confusing 404s:
+There is no published specification. Everything below is taken from
+[`hardbyte/python-evnex`](https://github.com/hardbyte/python-evnex), a
+maintained open-source client, and cross-checked against the Enterprise
+OpenAPI definitions where the two overlap (the session and charge-point
+schemas are near-identical, which is good corroboration).
 
-|                | Host                    |
-| -------------- | ----------------------- |
-| Token endpoint | `https://auth.evnex.io` |
-| API            | `https://api.evnex.io`  |
+What that means in practice:
 
-### 4.2 Getting a token
+- **It can change without notice.** No deprecation window, no changelog. Treat
+  a sudden 4xx as "Evnex changed something", not "our code broke".
+- **The Cognito client ID below is the mobile app's.** It is not issued to this
+  project and could be rotated at any time.
+- **Parse defensively.** Treat unknown fields as ignorable and missing optional
+  fields as normal. Do not fail a whole poll because one session has a shape
+  you did not expect; collect it as an issue, the way `import.ts` already does
+  for spreadsheet rows.
 
-```
-POST https://auth.evnex.io/oauth2/token
-Authorization: Basic <base64("clientId:clientSecret")>
-Content-Type: application/x-www-form-urlencoded
+The upside is decisive for this project: it works with the account the user
+already has, with no Enterprise purchase.
 
-grant_type=client_credentials
-```
+### 4.1 Two services
+
+|      | Endpoint                                                                   |
+| ---- | -------------------------------------------------------------------------- |
+| Auth | AWS Cognito, user pool `ap-southeast-2_zWnqo6ASv`, region `ap-southeast-2` |
+| API  | `https://client-api.evnex.io`                                              |
+
+Cognito app client ID: `rol3lsv2vg41783550i18r7vi`. This is a public client —
+there is no client secret.
+
+### 4.2 Signing in
+
+Cognito username/password authentication against that pool, returning the
+standard three-token set:
 
 ```json
-{ "access_token": "…", "expires_in": 86400, "token_type": "Bearer" }
+{ "AccessToken": "…", "IdToken": "…", "RefreshToken": "…", "ExpiresIn": 3600 }
 ```
 
-Standard OAuth2 client-credentials with HTTP Basic client authentication.
-Base64 the `clientId:clientSecret` pair with `Buffer.from(…).toString('base64')`
-— no `openssl` shelling out, and note the docs' `echo -n` (no trailing newline).
+Two implementation notes that matter:
 
-There is **no refresh token**, by design: the client credentials themselves are
-durable, so re-authentication is simply repeating this exchange. Consequently
-there is no "reconnect" flow to build and nothing expires from the user's point
-of view.
+- **MFA.** Evnex accounts can have TOTP enabled, in which case the initial
+  sign-in returns a challenge that must be answered with a 6-digit code
+  (§7.1). This only ever happens at sign-in, never on refresh.
+- **Refresh.** The refresh token resumes a session with no password and no MFA
+  prompt. **Cognito omits the refresh token from a refresh response unless
+  rotation is enabled — carry the existing one forward** rather than
+  overwriting it with `undefined`, or the integration silently dies at the next
+  access-token expiry.
+
+Access tokens are short-lived (~1 hour). Refresh tokens last far longer — a
+Cognito pool default of 30 days is typical — but they do eventually expire,
+which is what makes the reconnect flow in §7.1 necessary rather than
+theoretical.
 
 ### 4.3 Using the token — the `Bearer` trap
 
-> Requests to `api.evnex.io` send the **bare token**:
-> `Authorization: <access_token>` — **not** `Authorization: Bearer <token>`,
-> despite the token response saying `"token_type": "Bearer"`.
+> Requests to `client-api.evnex.io` send the **bare access token**:
+> `Authorization: <AccessToken>` — **not** `Authorization: Bearer <token>`.
+> Send the **access** token, not the ID token.
 
-This is what the documented examples show, and it matches the OpenAPI
-`securitySchemes` entry declaring `ClientAuthorization` as `type: apiKey` in
-the `Authorization` header rather than `type: http, scheme: bearer`. Sending
-the conventional `Bearer ` prefix is the single most likely cause of an
+`python-evnex` sets `request.headers["Authorization"] = token` with no prefix.
+Adding the conventional `Bearer ` is the single most likely cause of an
 otherwise-inexplicable 401. Assert this in a comment at the call site.
 
-Tokens last **24 hours** (`expires_in: 86400`). An invalid or expired token
-returns **401 Unauthorized**.
+**On any 401: refresh once and retry the request, then fail.** Never loop.
+`python-evnex` does exactly this, and it is what covers a token invalidated
+before its nominal expiry.
 
 ### 4.4 Endpoints used
 
-| Purpose            | Request                                                   |
-| ------------------ | --------------------------------------------------------- |
-| List charge points | `GET /v1/charge-points/`                                  |
-| Get charge point   | `GET /v1/charge-points/{id}`                              |
-| List sessions      | `GET /v1/charge-points/{id}/sessions?from=<ISO>&to=<ISO>` |
+| Purpose            | Request                                            |
+| ------------------ | -------------------------------------------------- |
+| User + org list    | `GET /v2/apps/user`                                |
+| List charge points | `GET /v2/apps/organisations/{orgId}/charge-points` |
+| List sessions      | `GET /charge-points/{chargePointId}/sessions`      |
 
-`from` and `to` are both **required** on the sessions call — there is no
-"everything since" form, so the window in §6.2 is mandatory, not merely
-prudent. The documentation defines **no pagination parameters and no pagination
-envelope**: the response is a flat `{ data: [...] }`. A tight window is
-therefore the only bound on response size.
+Note the sessions path has **no `/v2/apps` prefix** — that asymmetry is real,
+not a transcription slip.
 
-Errors are `{ errors: [{ status, title, code?, detail?, meta: { correlationId } }] }`.
-Log `correlationId` when surfacing an error — it is what Evnex support will ask
-for.
+`orgId` comes from `GET /v2/apps/user`, which returns the account's
+organisations; take the first unless the user has several. It is cached on the
+integration row (§5.1) so a poll does not need the extra round trip.
+
+> **The sessions endpoint takes no parameters.** No `from`/`to`, no pagination.
+> Whatever the server considers recent is what arrives, and the app cannot
+> narrow it.
+>
+> This inverts §6.2: the lookback window becomes a **client-side filter**, and
+> `planImport`'s `outside_window` rule goes from belt-and-braces to
+> load-bearing. It also means response size is not under our control, so the
+> parse must tolerate a larger list than expected.
 
 ### 4.5 Charge point response
 
-`{ data: { id, type: "chargePoints", attributes: { … } } }`, where `attributes`
-carries `name`, `timeZone` (IANA, e.g. `Pacific/Auckland`), `serial`, `model`,
+`{ data: [ { id, type, attributes: { … } } ] }`, where `attributes` carries
+`name`, `timeZone` (IANA, e.g. `Pacific/Auckland`), `serial`, `model`,
 `networkStatus`, `connectors[]`.
 
-`attributes.timeZone` is load-bearing — see §6.3.
+`timeZone` is load-bearing — see §6.3 — and in `python-evnex` it is typed on
+the charge-point **detail** model rather than the list item. If the list
+response turns out not to carry it, fetch the detail for the selected charger
+once at setup and cache it on the integration row (§5.1); the poll must not
+depend on a field that may not be there.
 
-### 4.6 Session response — energy is not a field
+### 4.6 Session response — nearly everything is optional
 
-`{ data: [ { id, type: "sessions", attributes: { … }, relationships: { … } } ] }`.
+`{ data: [ { id, type, attributes: { … }, relationships: { … } } ] }`, matching
+`EvnexChargePointSession`. Only `id`, `type` and `attributes` are guaranteed.
 
-The `attributes` fields that matter:
+| Field                                                                               | Notes                                                                                                                                      |
+| ----------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| `startDate`                                                                         | Session start — the app's `date`/`time`. **Optional here**, unlike the Enterprise schema where it is required.                             |
+| `endDate`                                                                           | Optional. Absent while in progress.                                                                                                        |
+| `sessionStatus`                                                                     | Optional `string` — _not_ a required enum here. Observed values match `Pending \| Authorized \| Active \| Closed \| Completed \| Invalid`. |
+| `transaction`                                                                       | Optional object. When present: `meterStart` (**Wh**), `meterStop` (**Wh**, absent until charging finishes), `startDate`, `endDate`.        |
+| `totalEnergyUsage`                                                                  | Optional **object** (`EvnexEnergyUsage`), not a number. Unit undocumented — see §4.7.                                                      |
+| `totalPowerUsage`                                                                   | Deprecated in the Enterprise schema. Do not use.                                                                                           |
+| `totalCost`                                                                         | Evnex's own cost figure. **Deliberately ignored** — see below.                                                                             |
+| `totalDuration`, `totalCarbonUsage`, `connectorId`, `evseId`, `authorizationMethod` | Not used.                                                                                                                                  |
 
-| Field                                                                 | Notes                                                                                                                                                                                              |
-| --------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `startDate`                                                           | date-time, **required**. The session start — what the app stores as `date`/`time`.                                                                                                                 |
-| `endDate`                                                             | date-time, optional. Absent while in progress.                                                                                                                                                     |
-| `sessionStatus`                                                       | **required**. `Pending \| Authorized \| Active \| Closed \| Completed \| Invalid`. The schema states: _"A session is considered to be in-progress unless its status is 'Completed' or 'Invalid'"_. |
-| `transaction.meterStart`                                              | **Wh**, required.                                                                                                                                                                                  |
-| `transaction.meterStop`                                               | **Wh**, optional — absent until charging finishes.                                                                                                                                                 |
-| `totalPowerUsage`                                                     | **Deprecated. Do not use.**                                                                                                                                                                        |
-| `totalCost`                                                           | Evnex's own cost figure. **Deliberately ignored** — see below.                                                                                                                                     |
-| `totalDuration`, `totalCarbonUsage`, `token`, `connectorId`, `evseId` | Not used.                                                                                                                                                                                          |
-
-> **There is no supported kWh field.** The only non-deprecated energy figure is
-> the meter delta, in watt-hours:
+> **Energy comes from the meter delta, in watt-hours:**
 >
 > ```
 > kWh = (transaction.meterStop − transaction.meterStart) / 1000
@@ -161,17 +190,31 @@ The `attributes` fields that matter:
 > `meterStop` being absent _is_ the "still charging" signal, and is what makes
 > the deferred-kWh design in §6.5 necessary rather than merely tidy.
 
+**The optionality is the main difference from the Enterprise schema, and it is
+load-bearing.** Two consequences the implementation must handle rather than
+assume away:
+
+- **No `startDate`** → the session cannot be placed on a date at all, so it
+  cannot become a row. Skip it and collect it as an issue (§4.0) rather than
+  crashing the poll or inventing `new Date()`.
+- **No `transaction`** → `energyKwh` is null, exactly as if `meterStop` were
+  missing. The existing `still_charging` path already covers this.
+- **No `sessionStatus`** → treat as "not Invalid" and let the meter decide.
+  Rule 1 in §6.5 must test `=== 'Invalid'`, never `!== 'Completed'`, or every
+  status-less session gets tombstoned.
+
 `totalCost` is ignored on purpose. The lease report must price electricity
 using this app's own versioned rate plans (`resolveRatePlan`), which encode
 what the user actually pays and change over time; Evnex's figure comes from
 whatever tariff is configured on the charger and would silently diverge.
 
-### 4.7 Do not copy `-k` from the docs
+### 4.7 Reading the schema from `python-evnex`
 
-The documented `curl` examples pass `-k`, which disables TLS certificate
-verification. That is a convenience in a copy-paste example and must not be
-carried into the implementation — `fetch` verifies by default and should be
-left alone.
+`EvnexChargePointSessionAttributes` also carries `totalEnergyUsage`, which the
+Enterprise schema does not expose. It is tempting as a ready-made kWh figure,
+but its **unit is undocumented** and the sibling `totalPowerUsage` is deprecated
+in the Enterprise schema — so use the meter delta above, which is unambiguous
+in watt-hours. Revisit only with a real response to measure against.
 
 ---
 
@@ -187,23 +230,23 @@ state with a very different lifecycle.
 export const evnexIntegration = sqliteTable('evnex_integration', {
 	id: integer('id').primaryKey({ autoIncrement: true }),
 
-	// User-entered, via /settings. Credentials are deliberately absent — they
-	// come from the environment or config.json (§5.6) and are never written here.
+	// User-chosen, via /settings. The password is deliberately absent: it is
+	// used once at sign-in and never persisted (§5.6).
+	email: text('email'), // shown in /settings so the user knows which account
+	orgId: text('org_id'), // from GET /v2/apps/user, cached (§4.4)
 	chargePointId: text('charge_point_id'), // UUID of the home charger
 	chargePointName: text('charge_point_name'), // cached for display
 	chargePointTimeZone: text('charge_point_time_zone'), // IANA, cached; see §6.3
 	importLookbackDays: integer('import_lookback_days').notNull().default(3),
 	enabled: integer('enabled', { mode: 'boolean' }).notNull().default(false),
 
-	// Generated — never user-entered, never sent to the client.
-	// 24-hour token from auth.evnex.io (§4.2); expiry is computed at mint time
-	// as now + expires_in, since the response carries a duration, not a date.
+	// Generated at sign-in, never user-entered, never sent to the client.
+	// Cognito token set (§4.2). The refresh token is a real credential: it can
+	// mint access tokens for as long as the pool allows, so it is as sensitive
+	// as the password and must never be logged or rendered.
 	accessToken: text('access_token'),
 	accessTokenExpiresAt: text('access_token_expires_at'), // ISO datetime
-	// SHA-256 of EVNEX_CLIENT_ID, so a credential rotation can be detected and
-	// the stale token discarded (§6.6). A hash, not the value — this table must
-	// never hold anything that identifies the account.
-	credentialFingerprint: text('credential_fingerprint'),
+	refreshToken: text('refresh_token'),
 
 	// Last poll outcome, for the status line in /settings
 	lastPolledAt: text('last_polled_at'),
@@ -213,6 +256,10 @@ export const evnexIntegration = sqliteTable('evnex_integration', {
 	lastPollError: text('last_poll_error')
 });
 ```
+
+`auth_failed` now means something actionable: the refresh token has expired or
+been revoked, and the user must sign in again (§7.1). It is the one poll
+failure that cannot be retried away.
 
 ### 5.2 New table: `evnex_dismissed_sessions`
 
@@ -360,126 +407,60 @@ the dismissed session on the next poll. Do not add one.
 Regardless, the generated SQL must be **read before committing**, to confirm
 the `INSERT … SELECT` carries every column and existing rows survive the copy.
 
-### 5.6 Configuration: two credential sources
+### 5.6 Credentials: sign in once, keep the token
 
-Credentials never go in the database. They come from one of two places,
-depending on how the app is deployed:
+The email and password are entered in `/settings`, used **once** to sign in,
+and never persisted. What is persisted is the Cognito token set on the
+integration row (§5.1) — which is exactly the shape the original requirement
+asked for: user-entered details in `/settings`, generated credentials in the
+database.
 
-| Deployment           | Source                                    | Entered how                      |
-| -------------------- | ----------------------------------------- | -------------------------------- |
-| Server (Docker etc.) | `EVNEX_CLIENT_ID` / `EVNEX_CLIENT_SECRET` | Environment, set by the operator |
-| Desktop (Electron)   | `<userData>/config.json`                  | The `/settings` UI (§5.7)        |
-
-A single resolver in `src/lib/server/evnex-config.ts` answers "what are the
-credentials?" for both, **environment first**:
-
-```ts
-export interface EvnexCredentials {
-	clientId: string;
-	clientSecret: string;
-}
-
-/** Null when either half is missing or blank — an expected state, not an error. */
-export function resolveEvnexCredentials(): EvnexCredentials | null;
+```
+email + password ──▶ Cognito ──▶ { access, refresh, expiresAt } ──▶ evnex_integration
+     (never stored)                        (stored)
 ```
 
-Environment wins so that a container's explicit operator configuration cannot
-be silently overridden by a stale file, and so the desktop build behaves
-predictably if someone does set both.
+The refresh token then carries the integration indefinitely without another
+password prompt — and, importantly, without another MFA prompt.
 
-#### From the environment
+**Treat the refresh token as a password equivalent.** It mints access tokens
+for as long as the pool allows. It must never be logged, never returned by a
+`load`, and never rendered. That it lives in the database is a deliberate
+trade: it is what makes unattended polling possible at all, and the database
+already holds the user's home address and full charging history.
 
-```sh
-EVNEX_CLIENT_ID=…
-EVNEX_CLIENT_SECRET=…
-```
+#### This supersedes the environment-variable design
 
-Read through `$env/dynamic/private`, matching `DATABASE_URL` in
-`src/lib/server/db/index.ts`. **Dynamic, not static** — the Docker image is
-built once and configured at run time, so a build-time binding would freeze
-whatever was set in the builder. Being dynamic also means the Dockerfile needs
-no placeholder value the way `DATABASE_URL` needs one at line 15.
+Earlier revisions of this plan used `EVNEX_CLIENT_ID` / `EVNEX_CLIENT_SECRET`
+environment variables, and a `config.json` credential store for the Electron
+build. Both existed because the Enterprise API's client credentials are static
+secrets that a user cannot obtain interactively.
 
-Absent or blank credentials are a normal, expected state, not an error: the
-integration is simply unconfigured and the poll button stays disabled (§7.2).
-Do not throw at boot the way `DATABASE_URL` does — an unset Evnex variable must
-never stop the app from starting.
+Cognito changes the shape of the problem: there is nothing static to configure,
+because signing in **is** an interactive act. So:
 
-#### Surfaces to update
+- **No `EVNEX_*` environment variables.** Nothing to put in `.env.example`, the
+  Dockerfile, or the Unraid template.
+- **No `CONFIG_PATH`, and no `config.json` changes.** `electron/main.cjs` is
+  untouched, and `config.json` keeps holding only `databasePath`.
+- **One code path for every deployment.** Docker, Unraid and the desktop build
+  all sign in through the same `/settings` form.
 
-| File                         | Change                                                                                                                                                                                                                       |
-| ---------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `.env.example`               | Document both, commented out, following the existing optional-variable style used for `NOMINATIM_BASE_URL`.                                                                                                                  |
-| `Dockerfile`                 | Nothing. Do not add `ENV EVNEX_CLIENT_SECRET=` — an image must never carry a default credential, and dynamic env needs no build-time placeholder.                                                                            |
-| `docker/entrypoint.sh`       | Nothing. It `exec`s the app, so the environment passes through.                                                                                                                                                              |
-| `unraid/ev-charging-log.xml` | Two `<Config … Type="Variable">` entries alongside the existing `PUID`/`PGID`, `Required="false"`. Set **`Mask="true"`** on the secret so Unraid renders it as a password field instead of plain text on the container page. |
+This delivers the Electron requirement — credentials enterable in the UI on the
+desktop — more simply than the `config.json` route did, and it removes the
+merge-and-atomic-write hazard that route introduced around `databasePath`.
 
-### 5.7 The desktop build: `config.json` in `userData`
+The one thing lost is unattended bootstrap: a freshly restored deployment needs
+someone to open `/settings` and sign in once. For a single-user self-hosted app
+that is a one-off, and it is the same interaction the Evnex mobile app requires.
 
-A desktop user cannot reasonably set environment variables, so the Electron
-build lets them type the credentials into `/settings` and persists them to the
-`config.json` that `electron/main.cjs` already maintains in `userData` — the
-same file and mechanism used today for `databasePath`:
+#### Signing out
 
-```json
-{
-	"databasePath": "/path/to/db",
-	"evnexClientId": "…",
-	"evnexClientSecret": "…"
-}
-```
-
-#### How the server finds the file
-
-`electron/main.cjs` already computes `<userData>/config.json` inside
-`resolveDatabasePath` (line 27) and already injects environment into the forked
-server (the `fork` `env` block at line 87). Add one variable there:
-
-```js
-CONFIG_PATH: path.join(app.getPath('userData'), 'config.json'),
-```
-
-Hoist the path out of `resolveDatabasePath` so both uses share one expression
-rather than rebuilding it. Unprefixed naming matches the existing
-`MIGRATIONS_FOLDER` / `DATABASE_URL` convention.
-
-**`CONFIG_PATH` being set is the signal that this deployment has a writable
-credential store.** The server does not need to know it is running under
-Electron, and nothing needs to sniff `ELECTRON_RUN_AS_NODE`. When `CONFIG_PATH`
-is unset — every server deployment — the config file source simply does not
-exist and `/settings` shows no credential fields (§7.1).
-
-#### Reading
-
-`resolveEvnexCredentials` reads and parses `CONFIG_PATH` **per call, not cached
-at boot**. Credentials entered in the UI must work immediately; caching would
-mean a restart, and the user has no obvious reason to suspect one is needed.
-The file is a few hundred bytes and a poll is a manual, human-paced action, so
-re-reading it costs nothing worth optimising.
-
-Parse failures are non-fatal: log and fall through to "no credentials", exactly
-as `resolveDatabasePath` already does for a corrupt file.
-
-#### Writing — merge, never overwrite
-
-`?/saveEvnex` writes the two keys back. Three requirements, all of which are
-easy to get wrong and expensive when wrong:
-
-1. **Read-modify-write.** `databasePath` lives in this file. Serialising a
-   fresh `{ evnexClientId, evnexClientSecret }` over the top would drop it, and
-   the next launch would silently open a _different database_ at the default
-   path — the user's entire history apparently gone. Preserve unknown keys too.
-2. **Write atomically**: write a sibling temp file, `fsync`, then `rename` over
-   the target. A crash or a full disk mid-write must not leave a truncated
-   `config.json`, for the same reason.
-3. **`chmod 0600`.** The secret is plaintext at rest, so it should at least not
-   be world-readable on a shared machine.
-
-Plaintext at rest is accepted here for the same reasons as the rest of this
-app's data: `userData` is a per-user directory, this is a single-user desktop
-app, and the same directory already holds the charging history itself. It is
-worth noting that this is a genuine step down from the server deployment, where
-the secret lives only in the operator's environment.
+A **Disconnect** action clears `accessToken`, `refreshToken`,
+`accessTokenExpiresAt` and `email`, leaving the charge point selection and
+lookback setting intact so reconnecting does not mean reconfiguring. It is also
+the honest way to revoke this app's access without changing the account
+password.
 
 ---
 
@@ -492,14 +473,16 @@ Per the convention in CLAUDE.md, split four ways:
 | File                                  | Responsibility                                                                                                                                  | Tested                                                  |
 | ------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------- |
 | `src/lib/server/evnex.ts`             | **Pure.** Window arithmetic, timezone conversion, payload → draft mapping, insert/update/skip planning, token expiry. No `fetch`, no db import. | Vitest, `evnex.test.ts`                                 |
-| `src/lib/server/evnex-config.ts`      | Credential resolution across environment and `config.json` (§5.6, §5.7), and the atomic merge-write. Touches `fs` and env, never the db.        | Vitest for the pure merge/precedence helpers            |
+| `src/lib/server/evnex-auth.ts`        | Cognito sign-in, MFA challenge, and refresh (§4.2). The only place that knows about Cognito. Returns a token set; never touches the db.         | Not unit tested (network + SDK)                         |
 | `src/lib/server/evnex-client.ts`      | The only place that calls `fetch`. Auth exchange, charge-point fetch, session listing, error mapping.                                           | Not unit tested (the Vitest project is pure logic only) |
 | `src/routes/sessions/+page.server.ts` | New `?/pollEvnex` action wiring db + client + pure logic.                                                                                       | Playwright                                              |
 
-`evnex-config.ts` does I/O, so it does not belong in `evnex.ts`. Keep the parts
-that _are_ pure — precedence between the two sources, and merging new keys into
-an existing config object — as exported functions taking plain arguments, so
-the rules in §5.7 can be tested without touching a filesystem.
+Keeping Cognito in its own module matters more than usual here: it is the part
+most likely to need swapping if Evnex changes the mobile app's auth (§4.0), and
+it is the only place that needs an AWS dependency. Decide early whether that is
+`amazon-cognito-identity-js`, the `@aws-sdk/client-cognito-identity-provider`
+`InitiateAuth` call, or a hand-rolled SRP exchange — it is the single largest
+new dependency this feature introduces, in an app that currently has none.
 
 ### 6.2 The lookback window
 
@@ -661,6 +644,7 @@ export function planImport(
 type SkipReason =
 	| 'invalid'
 	| 'invalid_after_import'
+	| 'unmappable' // no startDate — §4.6
 	| 'outside_window'
 	| 'dismissed'
 	| 'already_complete'
@@ -668,8 +652,16 @@ type SkipReason =
 	| 'period_submitted';
 ```
 
+Because the API returns whatever it considers recent and accepts no date range
+(§4.4), `outside_window` is the rule that actually enforces
+`importLookbackDays` — it is not a redundant guard.
+
 Rules, in order:
 
+0. No `startDate` → `unmappable`. The session cannot be placed on a date, so it
+   cannot become a row (§4.6). Do **not** tombstone it: unlike an Invalid
+   session this is a data gap, possibly transient, and a later poll may see a
+   complete record.
 1. `sessionStatus === 'Invalid'` → **tombstone immediately** and skip. Invalid
    sessions occur in normal operation, and an Invalid session did not deliver
    energy, so it must never reach a lease report. Two sub-cases:
@@ -715,28 +707,30 @@ imported at all is §12.4.
 
 The action, in order:
 
-1. Call `resolveEvnexCredentials()` (§5.6) and load the integration row.
-   `fail(400)` if credentials are missing, the charge point is unset, or the
-   integration is switched off — with a message naming which, since the fixes
-   are completely different, and for credentials the fix differs again by
-   deployment (§7.1).
-2. Ensure a valid token — reuse `accessToken` when
-   `!isTokenExpired(accessTokenExpiresAt, new Date())` (60s clock skew),
-   otherwise mint a new one (§4.2) and persist it with
-   `expiresAt = now + expires_in`.
+1. Load the integration row. `fail(400)` if there is no refresh token, the
+   charge point is unset, or the integration is switched off — naming which,
+   since the fixes are completely different (sign in, pick a charger, flip the
+   switch).
+2. Ensure a valid access token — reuse it when
+   `!isTokenExpired(accessTokenExpiresAt, new Date())` (30–60s clock skew),
+   otherwise refresh (§4.2) and persist the result.
 
-   **Clear the stored token if the credentials change.** A token minted from a
-   rotated client secret stays nominally valid for 24 hours, so after a
-   credential swap the app would keep using the old one until it expired. Store
-   a hash of the client ID alongside the token and discard the token when it no
-   longer matches — never store the credentials themselves to compare.
+   **Carry the existing refresh token forward** when the refresh response omits
+   one — Cognito only returns a new one if rotation is enabled, and writing
+   `undefined` over it kills the integration at the next expiry (§4.2).
 
-3. `GET /v1/charge-points/{id}` — refresh cached name and timezone.
-4. `GET /v1/charge-points/{id}/sessions?from=…&to=…` for the §6.2 window.
+   A refresh that fails with an expired or revoked token is terminal: record
+   `lastPollStatus = 'auth_failed'` and stop. It cannot be retried, and §7.1
+   turns it into a Reconnect prompt.
 
-   **Any 401 on steps 3–4 triggers exactly one re-auth and retry.** A token can
-   be revoked or invalidated before its nominal 24 hours are up, so expiry
-   arithmetic alone is not sufficient. One retry, then fail — never a loop.
+3. `GET /v2/apps/organisations/{orgId}/charge-points` — refresh the cached name
+   and timezone for the selected charger.
+4. `GET /charge-points/{chargePointId}/sessions` — no parameters (§4.4). The
+   lookback window is applied afterwards, by `planImport`.
+
+   **Any 401 on steps 3–4 triggers exactly one refresh and retry.** A token can
+   be invalidated before its nominal expiry, so expiry arithmetic alone is not
+   sufficient. One retry, then fail — never a loop.
 
 5. Load existing sessions, dismissed IDs, and billing periods from the db.
 6. Call `planImport`.
@@ -772,49 +766,55 @@ session as already dismissed.
 
 A second `<Card>` below the existing one, with its own `?/saveEvnex` action.
 
-Always present, regardless of deployment:
+The card has two shapes, driven by a `connected: boolean` from `load` —
+true when a refresh token exists.
 
-| Field                         | Control                                    | Notes                                                                 |
-| ----------------------------- | ------------------------------------------ | --------------------------------------------------------------------- |
-| Charge point                  | `Select`                                   | Populated from `GET /v1/charge-points/` by **Test connection** (§4.4) |
-| Import sessions from the last | `Textfield` `type="number"`, suffix "days" | Default 3, min 1                                                      |
-| Enabled                       | `Switch`                                   | Gates the poll button                                                 |
+#### Signed out
 
-#### Credentials: the section that changes shape
+| Field    | Control                       |
+| -------- | ----------------------------- |
+| Email    | `Textfield` `type="email"`    |
+| Password | `Textfield` `type="password"` |
 
-`load` returns a `credentialSource` of `'env' | 'file' | 'none'`, derived from
-whether `EVNEX_CLIENT_ID`/`EVNEX_CLIENT_SECRET` are set and whether
-`CONFIG_PATH` is set (§5.6, §5.7). The card renders one of three things:
+…and a **Connect** button, posting to `?/connectEvnex`. On submit the action
+signs in (§4.2), stores the token set, discards the password, fetches
+`GET /v2/apps/user` for `orgId`, and lists the charge points.
 
-- **`'env'`** — read-only: _"Credentials supplied by the environment."_ No
-  input fields. Editing them from the UI would mean writing somewhere the
-  environment does not read from, which cannot work.
-- **`'file'`** (desktop) — **Client ID** and **Client secret** `Textfield`s,
-  the secret as `type="password"`, saved to `config.json` by `?/saveEvnex`.
-- **`'none'`** (server, unconfigured) — no fields, and a message naming
-  `EVNEX_CLIENT_ID` and `EVNEX_CLIENT_SECRET`, stating they are set in the
-  environment and need a restart. Someone hitting this has no other way to
-  discover what is wrong, so it must be specific rather than a generic "not
-  configured".
+**If Cognito returns an MFA challenge**, the card swaps to a single 6-digit
+code field and completes the challenge. The Cognito session token for the
+challenge is short-lived and must be held for that one round trip only — never
+written to the database.
 
-Plus a **Test connection** button and a status line: _"Connected to
-'Home charger' · last polled 2 hours ago"_, or the last error.
+#### Connected
 
-#### The secret is write-only, in every deployment
+| Field                         | Control                                    | Notes                                                                    |
+| ----------------------------- | ------------------------------------------ | ------------------------------------------------------------------------ |
+| Charge point                  | `Select`                                   | Populated from `GET /v2/apps/organisations/{orgId}/charge-points` (§4.4) |
+| Import sessions from the last | `Textfield` `type="number"`, suffix "days" | Default 3, min 1                                                         |
+| Enabled                       | `Switch`                                   | Gates the poll button                                                    |
 
-`load` must never return the client secret, and must not return the client ID
-either — not even partially masked. It returns `credentialSource` and a
-`hasCredentials: boolean`, nothing more. "Helpfully" showing which client ID is
-in use is the obvious way this leaks.
+Above them: _"Connected as `user@example.com` · last polled 2 hours ago"_, and
+a **Disconnect** action (§5.6). Below, the last poll error if there was one.
 
-For the `'file'` case the field therefore behaves as write-only: it renders
-with a `••••••••` placeholder when credentials already exist, and **an empty
-submitted secret means "leave unchanged", not "clear it"**. A separate explicit
-**Clear credentials** action removes both keys from `config.json`, so wiping
-them stays possible without making a blank save destructive.
+#### When the refresh token expires
 
-Validate that client ID and secret are either both present or both absent — a
-half-saved pair produces a 401 whose cause is not obvious from the error.
+`lastPollStatus === 'auth_failed'` is a distinct state, not a generic error:
+the card reverts to the signed-out shape with a **Reconnect** prompt explaining
+that the Evnex session expired and needs the password again. The poll button on
+`/sessions` disables itself in the same condition (§7.2).
+
+This state is not hypothetical — Cognito refresh tokens expire on a pool-defined
+schedule (30 days is a common default), so any long-lived install reaches it.
+
+#### Never send secrets to the browser
+
+`load` returns `connected`, the email, and the charge point selection. It must
+never return the access token, the refresh token, or the password. The refresh
+token in particular is a password equivalent (§5.6).
+
+`lastPollError` is rendered on this page, so whatever `evnex-client.ts` writes
+there must be a summarised message, never a raw request echo that could contain
+the `Authorization` header.
 
 The same applies to `lastPollError` (§5.1): it is rendered on this page, so
 whatever `evnex-client.ts` puts there must be a summarised message plus the
@@ -1018,14 +1018,12 @@ configured test project:
 - The Wh → kWh conversion, including a session whose `meterStop` is absent.
 - `isTokenExpired` including the clock-skew margin.
 
-**Vitest** — `src/lib/server/evnex-config.test.ts`, for the pure helpers in
-§5.6/§5.7:
-
-- Environment wins over file when both are present.
-- Either half missing or blank resolves to `null`, not a half-populated pair.
-- **Merging preserves `databasePath`** and any unknown keys. This is the test
-  that stands between a save and pointing the desktop app at the wrong
-  database.
+- **The §4.6 optional-field cases**, which are the difference between the
+  consumer and Enterprise schemas and the likeliest source of a runtime crash:
+  a session with no `startDate` (→ `unmappable`, and **not** tombstoned), no
+  `transaction`, and no `sessionStatus` (→ treated as not-Invalid, not
+  tombstoned). A fixture built from a real response, once one is available,
+  beats hand-written objects here.
 - The existing `sessions.test.ts`, `dashboard.test.ts` and `report.test.ts`
   must be **extended** with null-odometer cases, not just kept passing — they
   are the regression net for §8.
@@ -1036,10 +1034,10 @@ light and dark**:
 - `/settings` with the new heading — SMUI `Select` and `Switch` are new
   controls on this page and MDC's resets have caused real regressions here
   before.
-- `/settings` in all three `credentialSource` states (§7.1), since the card
-  renders different controls in each. The `'file'` variant is reachable in a
-  normal dev server by setting `CONFIG_PATH` to a temp file — no Electron
-  build required to exercise it.
+- `/settings` in each §7.1 state — signed out, MFA challenge, connected, and
+  the `auth_failed` reconnect prompt — since the card renders different
+  controls in each. All four are reachable by seeding `evnex_integration`
+  directly; none needs a live Evnex account.
 - `/sessions` poll button in both disabled (unconfigured) and enabled states.
 - A draft row showing both **Add kWh** and **Add odometer**.
 - The §7.4 chip: a manual row and an imported row **in the same screenshot**,
@@ -1066,14 +1064,14 @@ either suite above and has to be done deliberately:
 
 Each phase lands green (`npm run check`, `npm run lint`, `npm run test`).
 
-| #   | Phase                                                                                                     | Notes                                                                                                                                                                                                                                                                                                                                                                             |
-| --- | --------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 1   | Nullable odometer + the §8 ripple + the §5.5 foreign-key fix                                              | No Evnex code at all. Largest phase; ships a coherent "drafts can be missing an odometer" capability on its own.                                                                                                                                                                                                                                                                  |
-| 2   | Schema: `evnex_integration`, `evnex_dismissed_sessions`, `external_id`                                    | Migration only, plus the tombstone write in `?/delete`.                                                                                                                                                                                                                                                                                                                           |
-| 3   | `evnex.ts` pure logic + full Vitest suite                                                                 | No network, no UI.                                                                                                                                                                                                                                                                                                                                                                |
-| 4   | `evnex-config.ts` + `evnex-client.ts` + §5.6/§5.7 config surfaces + `/settings` section + Test connection | First real API contact. Verify §4.3 (bare token, no `Bearer`) against the live API before building on it. Land `.env.example`, the Unraid variables and the `main.cjs` `CONFIG_PATH` change here, not in phase 6 — the feature cannot be configured without them. Exercise the desktop path in a **packaged** build, not just `electron:dev`: `userData` differs between the two. |
-| 5   | Poll button + `?/pollEvnex`                                                                               | The payoff.                                                                                                                                                                                                                                                                                                                                                                       |
-| 6   | Playwright verification + §13 documentation updates                                                       |                                                                                                                                                                                                                                                                                                                                                                                   |
+| #   | Phase                                                                  | Notes                                                                                                                                                                                                                                                                                                                                                         |
+| --- | ---------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1   | Nullable odometer + the §8 ripple + the §5.5 foreign-key fix           | No Evnex code at all. Largest phase; ships a coherent "drafts can be missing an odometer" capability on its own.                                                                                                                                                                                                                                              |
+| 2   | Schema: `evnex_integration`, `evnex_dismissed_sessions`, `external_id` | Migration only, plus the tombstone write in `?/delete`.                                                                                                                                                                                                                                                                                                       |
+| 3   | `evnex.ts` pure logic + full Vitest suite                              | No network, no UI.                                                                                                                                                                                                                                                                                                                                            |
+| 4   | `evnex-auth.ts` + `evnex-client.ts` + the `/settings` sign-in flow     | First real API contact, and the riskiest phase. **Spike the Cognito sign-in against a real account before anything else** — it decides the AWS dependency (§6.1) and confirms whether MFA is in play. Then verify §4.3 (bare access token, no `Bearer`) and capture one real sessions response as a test fixture. No deployment-config work: §5.6 removed it. |
+| 5   | Poll button + `?/pollEvnex`                                            | The payoff.                                                                                                                                                                                                                                                                                                                                                   |
+| 6   | Playwright verification + §13 documentation updates                    |                                                                                                                                                                                                                                                                                                                                                               |
 
 No phase is blocked on outstanding questions; the API contract in §4 is
 confirmed. Phase 4 is the first to need real credentials.
@@ -1105,14 +1103,23 @@ do not conflict and may land in either order. If offline mode lands first:
 | 2   | A `source` column (`manual` / `evnex` / `import`) instead of deriving provenance from `externalId != null`?                                                                                                                                                  | Derive from `externalId`. Add the column if a second integration ever appears.                                                                                                                                                                                         |
 | 3   | Multiple charge points on one account?                                                                                                                                                                                                                       | One charge point, chosen at setup. The schema change to support several is a table, not a column, so this is deliberately deferred rather than designed around.                                                                                                        |
 | 4   | Should a genuine 0 kWh session (plugged in, no energy drawn) be imported at all? **Distinct from an `Invalid` session**, which is now tombstoned on sight (§6.5 rule 1) — this row is only about a `Completed` session whose meter delta happens to be zero. | Import it as a normal session. It is real, it costs $0, and suppressing it would mean the poll silently disagrees with the charger's own history. If these turn out to be noise too, the tombstone mechanism from §6.5 applies unchanged — only the predicate differs. |
-| 5   | **Blocker, not a preference:** this needs an Evnex **Enterprise** account — the client ID/secret live under "My Organisation" in CP-Link.                                                                                                                    | Confirm the account tier before starting phase 4. Phases 1–3 are useful regardless, but the feature is dead without API access, and that is worth knowing early.                                                                                                       |
+| 5   | Does the Evnex account have **TOTP MFA** enabled? It changes phase 4's sign-in flow (§7.1) from one form to two.                                                                                                                                             | Build the challenge path regardless — `python-evnex` supports it, so it is reachable, and discovering it mid-implementation is worse than a state that goes unused.                                                                                                    |
 | 6   | Evnex's exact brand green (§7.4). `#15803d` is a placeholder — the documentation host was blocked by egress policy, so the real hex could not be read.                                                                                                       | Ship `#15803d`. If the brand value is a bright lime it cannot be used as the light-mode foreground (1.84:1 vs a 3.07:1 baseline); keep it for the dark tint and darken it for light.                                                                                   |
 
-**Resolved:** where the client secret lives. Earlier drafts stored it in
-SQLite. Server deployments now take it from the environment only (§5.6); the
-desktop build persists it to `config.json` in `userData` (§5.7), which is
-plaintext at rest but per-user, `0600`, and never in the database or a database
-backup.
+**Resolved:** which API, and therefore how credentials work. Earlier drafts
+targeted the Enterprise API and went through a client-secret-in-SQLite phase,
+then environment variables plus an Electron `config.json` store. Moving to the
+consumer Cloud API (§4) removed the problem rather than relocating it: there is
+no static secret to place anywhere. The password is used once and discarded,
+and the token set lives in the database (§5.6).
+
+**Resolved:** the Enterprise-account blocker. It no longer applies — the
+consumer API works with an ordinary Evnex login, which is what made the switch
+worth making.
+
+**New risk, in exchange:** the API is unofficial and can change without notice
+(§4.0). That is a permanent operating condition of this feature, not a
+decision awaiting an answer.
 
 ---
 
@@ -1121,26 +1128,22 @@ backup.
 Owed once this lands:
 
 - **CLAUDE.md** — add an Evnex bullet to "Key domain logic": the `externalId`
-  dedupe key, the lookback window, the timezone rule in §6.3, the Wh → kWh
-  meter-delta derivation (§4.6), and the bare-token header (§4.3). Note
-  `evnex.ts` / `evnex-client.ts` in the layering convention.
-- **CLAUDE.md "Privacy"** — note that Evnex credentials live in `.env`
-  (already gitignored) and deliberately never reach the database, so a copy of
-  the SQLite file carries no API access.
-- **`.env.example`** — document `EVNEX_CLIENT_ID` and `EVNEX_CLIENT_SECRET`,
-  commented out, per §5.6.
-- **`unraid/ev-charging-log.xml`** — two `Type="Variable"` entries, the secret
-  with `Mask="true"`.
-- **README.md** — whatever setup section covers `DATABASE_URL` should mention
-  these, including that they require an Evnex Enterprise account (§12.5). The
-  existing "Desktop app (Electron)" section, which documents `config.json` and
-  `databasePath`, gains the two credential keys and a note that they are
-  normally set through `/settings` rather than by hand.
-- **PLAN.md §11.5** — the resolved-decisions entry describes `config.json` as
-  holding `databasePath`; it now also holds Evnex credentials, written by the
-  app rather than only read by it.
-- **`electron/main.cjs`** — the comment above `resolveDatabasePath` (line 23)
-  documents the file's shape and should list the new keys.
+  dedupe key, the client-side lookback window, the timezone rule in §6.3, the
+  Wh → kWh meter-delta derivation (§4.6), and the bare-token header (§4.3).
+  Note `evnex.ts` / `evnex-auth.ts` / `evnex-client.ts` in the layering
+  convention, and record that the API is unofficial (§4.0) so nobody later
+  assumes a spec exists.
+- **CLAUDE.md "Privacy"** — the database now holds a Cognito refresh token,
+  which is a password equivalent for the Evnex account. The existing rule that
+  `data/` is gitignored and never committed matters more, not less.
+- **README.md** — a short "Evnex integration" note in the setup section: needs
+  an ordinary Evnex account, configured entirely through `/settings`, no
+  environment variables. Worth stating plainly that it uses an undocumented API
+  and may break.
+- **No deployment-config changes.** `.env.example`, the `Dockerfile`,
+  `unraid/ev-charging-log.xml`, `electron/main.cjs` and PLAN.md §11.5 are all
+  untouched by this feature — earlier revisions of this plan required edits to
+  each, and §5.6 removed the need.
 - **CLAUDE.md "Commands"** — the migrations-on-boot paragraph should record
   that foreign keys are disabled around `migrate()` and restored afterwards,
   and why (§5.5). Anyone who later "tidies up" that pragma would reintroduce
