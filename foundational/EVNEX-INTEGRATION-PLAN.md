@@ -251,12 +251,90 @@ two write paths:
 - `?/create` on `/sessions` — validation unchanged, odometer still required.
 - the Evnex import — the only producer of null-odometer rows.
 
-### 5.5 Migration
+### 5.5 Migration — foreign keys must be off during the table rebuild
 
 One migration via `npm run db:generate`, applied on boot by `hooks.server.ts`.
-Dropping `NOT NULL` from `odometer_km` triggers a SQLite table rebuild —
-Drizzle handles this, but the generated SQL must be **read before committing**
-to confirm existing rows survive the copy.
+
+SQLite cannot drop a column's `NOT NULL` in place, so removing it from
+`odometer_km` makes drizzle-kit emit a **table rebuild**: create `__new_…`,
+`INSERT … SELECT`, `DROP TABLE`, `RENAME`. There is direct precedent in this
+repo — `drizzle/0002_worthless_harpoon.sql` rebuilds this exact table the exact
+same way.
+
+**The `DROP TABLE` step is the dangerous one.** With foreign key enforcement
+on, dropping a table performs an implicit `DELETE FROM` for FK purposes, which
+cascades into any table referencing it. Rows the rebuild was meant to preserve
+are silently destroyed — no error, no rollback.
+
+#### The pragma drizzle-kit emits does not work
+
+`0002` opens with `PRAGMA foreign_keys=OFF;` and closes with `…=ON;`, which
+looks like the problem is already handled. It is not, for two reasons that
+compound:
+
+1. **better-sqlite3 enables foreign keys by default** — a fresh connection
+   reports `foreign_keys = 1`, unlike the sqlite3 CLI's default of off.
+2. **`PRAGMA foreign_keys` is a no-op inside a transaction**, and drizzle's
+   migrator wraps each migration in one — it issues `BEGIN` and then runs the
+   file's statements inside it (`drizzle-orm/sqlite-core/dialect.cjs`, the
+   `migrate` path). The pragma executes, returns success, and changes nothing.
+
+So the emitted pragma is dead code, and `0002` already rebuilt
+`charging_sessions` with enforcement live. That did no damage only because
+nothing currently references `charging_sessions` — the FK on that table points
+outward, to `billing_periods`. It is luck, not design, and this plan is exactly
+the change that starts adding tables around it.
+
+#### The fix: disable it on the connection, before `migrate()`
+
+In `src/lib/server/db/index.ts`, outside any transaction:
+
+```ts
+const client = new Database(env.DATABASE_URL);
+
+// SQLite implements column-constraint changes as a table rebuild
+// (CREATE __new_x / INSERT SELECT / DROP x / RENAME). With foreign keys
+// enforced — which better-sqlite3 does by default — the DROP cascades into any
+// table referencing x and silently deletes rows the rebuild meant to preserve.
+//
+// drizzle-kit does emit `PRAGMA foreign_keys=OFF` around those blocks, but its
+// migrator runs each migration inside BEGIN/COMMIT and the pragma is a no-op
+// within a transaction. Setting it out here, before migrate() opens one, is
+// what actually takes effect.
+client.pragma('foreign_keys = OFF');
+
+export const db = drizzle(client, { schema });
+
+migrate(db, { migrationsFolder: env.MIGRATIONS_FOLDER || 'drizzle' });
+
+// Step 10 of SQLite's documented table-rebuild procedure: confirm the rebuild
+// left nothing dangling before enforcement is restored for the app's queries.
+const violations = client.pragma('foreign_key_check') as unknown[];
+if (violations.length > 0) {
+	throw new Error(
+		`Migration left ${violations.length} foreign key violation(s): ${JSON.stringify(violations)}`
+	);
+}
+
+client.pragma('foreign_keys = ON');
+```
+
+Failing loudly on `foreign_key_check` is the point: a corrupted relational
+state that boots successfully is far worse than one that refuses to.
+
+This edit belongs in **phase 1**, landing with the odometer migration and
+before any new table exists, so every later rebuild inherits the protection.
+
+#### `evnex_dismissed_sessions` deliberately has no foreign key
+
+The tombstone table (§5.2) intentionally does **not** reference
+`charging_sessions.external_id`. Its entire purpose is to outlive the session
+row it describes — an FK, especially one with `ON DELETE CASCADE`, would delete
+the tombstone at the exact moment it starts being needed, and would resurrect
+the dismissed session on the next poll. Do not add one.
+
+Regardless, the generated SQL must be **read before committing**, to confirm
+the `INSERT … SELECT` carries every column and existing rows survive the copy.
 
 ---
 
@@ -569,6 +647,15 @@ light and dark**:
 
 The Evnex API itself is not contacted in tests; `evnex-client.ts` is stubbed.
 
+**Migration safety**, once per schema-changing phase — this is not covered by
+either suite above and has to be done deliberately:
+
+- Copy a database that has real rows in it, run the migration against the copy,
+  and confirm the row count and column values survive.
+- Confirm `PRAGMA foreign_keys` reports `0` at the moment `migrate()` runs and
+  `1` once boot completes — the §5.5 fix is invisible when it works and silent
+  when it does not, so assert it rather than assuming it.
+
 ---
 
 ## 10. Phasing
@@ -577,7 +664,7 @@ Each phase lands green (`npm run check`, `npm run lint`, `npm run test`).
 
 | #   | Phase                                                                  | Notes                                                                                                            |
 | --- | ---------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
-| 1   | Nullable odometer + the §8 ripple                                      | No Evnex code at all. Largest phase; ships a coherent "drafts can be missing an odometer" capability on its own. |
+| 1   | Nullable odometer + the §8 ripple + the §5.5 foreign-key fix           | No Evnex code at all. Largest phase; ships a coherent "drafts can be missing an odometer" capability on its own. |
 | 2   | Schema: `evnex_integration`, `evnex_dismissed_sessions`, `external_id` | Migration only, plus the tombstone write in `?/delete`.                                                          |
 | 3   | `evnex.ts` pure logic + full Vitest suite                              | No network, no UI.                                                                                               |
 | 4   | `evnex-client.ts` + `/settings` section + Test connection              | First real API contact. Verify §4.3 (bare token, no `Bearer`) against the live API before building on it.        |
@@ -628,6 +715,10 @@ Owed once this lands:
   meter-delta derivation (§4.6), and the bare-token header (§4.3). Note
   `evnex.ts` / `evnex-client.ts` in the layering convention.
 - **CLAUDE.md "Privacy"** — the database now holds API credentials.
+- **CLAUDE.md "Commands"** — the migrations-on-boot paragraph should record
+  that foreign keys are disabled around `migrate()` and restored afterwards,
+  and why (§5.5). Anyone who later "tidies up" that pragma would reintroduce
+  silent data loss on the next table rebuild.
 - **PLAN.md §4** — the data model gains two tables and two columns; the
   odometer is no longer mandatory.
 - **PLAN.md "Ongoing: Enhancements"** — add the Evnex integration entry.
