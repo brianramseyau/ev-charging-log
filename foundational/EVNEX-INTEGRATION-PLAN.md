@@ -25,12 +25,12 @@ charger knows into draft sessions, and leave the user to add the odometer.
 These were settled before drafting and are not open for re-litigation by the
 implementing agent:
 
-| # | Decision |
-| --- | --- |
-| 1 | **Odometer becomes nullable, but only the Evnex flow may omit it.** Manual session creation still requires it. A session missing an odometer is an incomplete draft: it cannot be exported, and it blocks period submission — same treatment as a session missing kWh. |
-| 2 | **Polling writes draft sessions straight to the database**, keyed by the Evnex session ID. A later poll finds the same ID and fills in kWh once charging has finished. It does not pre-fill the Add form. |
-| 3 | **Credentials are OAuth2 client-credentials, not a user login.** A client ID/secret pair (Evnex **Enterprise** account, found under "My Organisation" in CP-Link) is entered in `/settings` and exchanged for a 24-hour access token, which is persisted in the database and re-minted on expiry. See §4. |
-| 4 | **Written against today's architecture** — `+page.server.ts` loads and form actions, pure logic in `src/lib/server/`. See [§11](#11-relationship-to-offline-modeplanmd) for what changes if the offline-mode refactor lands first. The two plans are independent and may be built in either order. |
+| #   | Decision                                                                                                                                                                                                                                                                                                  |
+| --- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1   | **Odometer becomes nullable, but only the Evnex flow may omit it.** Manual session creation still requires it. A session missing an odometer is an incomplete draft: it cannot be exported, and it blocks period submission — same treatment as a session missing kWh.                                    |
+| 2   | **Polling writes draft sessions straight to the database**, keyed by the Evnex session ID. A later poll finds the same ID and fills in kWh once charging has finished. It does not pre-fill the Add form.                                                                                                 |
+| 3   | **Credentials are OAuth2 client-credentials, not a user login.** A client ID/secret pair (Evnex **Enterprise** account, found under "My Organisation" in CP-Link) is entered in `/settings` and exchanged for a 24-hour access token, which is persisted in the database and re-minted on expiry. See §4. |
+| 4   | **Written against today's architecture** — `+page.server.ts` loads and form actions, pure logic in `src/lib/server/`. See [§11](#11-relationship-to-offline-modeplanmd) for what changes if the offline-mode refactor lands first. The two plans are independent and may be built in either order.        |
 
 ## 3. What the user does, end to end
 
@@ -59,10 +59,10 @@ Confirmed against the Evnex reference documentation (`Authorization`,
 Authentication and the API live on **different hosts** — a detail easy to miss
 and productive of confusing 404s:
 
-| | Host |
-| --- | --- |
+|                | Host                    |
+| -------------- | ----------------------- |
 | Token endpoint | `https://auth.evnex.io` |
-| API | `https://api.evnex.io` |
+| API            | `https://api.evnex.io`  |
 
 ### 4.2 Getting a token
 
@@ -104,11 +104,11 @@ returns **401 Unauthorized**.
 
 ### 4.4 Endpoints used
 
-| Purpose | Request |
-| --- | --- |
-| List charge points | `GET /v1/charge-points/` |
-| Get charge point | `GET /v1/charge-points/{id}` |
-| List sessions | `GET /v1/charge-points/{id}/sessions?from=<ISO>&to=<ISO>` |
+| Purpose            | Request                                                   |
+| ------------------ | --------------------------------------------------------- |
+| List charge points | `GET /v1/charge-points/`                                  |
+| Get charge point   | `GET /v1/charge-points/{id}`                              |
+| List sessions      | `GET /v1/charge-points/{id}/sessions?from=<ISO>&to=<ISO>` |
 
 `from` and `to` are both **required** on the sessions call — there is no
 "everything since" form, so the window in §6.2 is mandatory, not merely
@@ -134,16 +134,16 @@ carries `name`, `timeZone` (IANA, e.g. `Pacific/Auckland`), `serial`, `model`,
 
 The `attributes` fields that matter:
 
-| Field | Notes |
-| --- | --- |
-| `startDate` | date-time, **required**. The session start — what the app stores as `date`/`time`. |
-| `endDate` | date-time, optional. Absent while in progress. |
-| `sessionStatus` | **required**. `Pending \| Authorized \| Active \| Closed \| Completed \| Invalid`. The schema states: *"A session is considered to be in-progress unless its status is 'Completed' or 'Invalid'"*. |
-| `transaction.meterStart` | **Wh**, required. |
-| `transaction.meterStop` | **Wh**, optional — absent until charging finishes. |
-| `totalPowerUsage` | **Deprecated. Do not use.** |
-| `totalCost` | Evnex's own cost figure. **Deliberately ignored** — see below. |
-| `totalDuration`, `totalCarbonUsage`, `token`, `connectorId`, `evseId` | Not used. |
+| Field                                                                 | Notes                                                                                                                                                                                              |
+| --------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `startDate`                                                           | date-time, **required**. The session start — what the app stores as `date`/`time`.                                                                                                                 |
+| `endDate`                                                             | date-time, optional. Absent while in progress.                                                                                                                                                     |
+| `sessionStatus`                                                       | **required**. `Pending \| Authorized \| Active \| Closed \| Completed \| Invalid`. The schema states: _"A session is considered to be in-progress unless its status is 'Completed' or 'Invalid'"_. |
+| `transaction.meterStart`                                              | **Wh**, required.                                                                                                                                                                                  |
+| `transaction.meterStop`                                               | **Wh**, optional — absent until charging finishes.                                                                                                                                                 |
+| `totalPowerUsage`                                                     | **Deprecated. Do not use.**                                                                                                                                                                        |
+| `totalCost`                                                           | Evnex's own cost figure. **Deliberately ignored** — see below.                                                                                                                                     |
+| `totalDuration`, `totalCarbonUsage`, `token`, `connectorId`, `evseId` | Not used.                                                                                                                                                                                          |
 
 > **There is no supported kWh field.** The only non-deprecated energy figure is
 > the meter delta, in watt-hours:
@@ -152,7 +152,7 @@ The `attributes` fields that matter:
 > kWh = (transaction.meterStop − transaction.meterStart) / 1000
 > ```
 >
-> `meterStop` being absent *is* the "still charging" signal, and is what makes
+> `meterStop` being absent _is_ the "still charging" signal, and is what makes
 > the deferred-kWh design in §6.5 necessary rather than merely tidy.
 
 `totalCost` is ignored on purpose. The lease report must price electricity
@@ -266,11 +266,11 @@ to confirm existing rows survive the copy.
 
 Per the convention in CLAUDE.md, split three ways:
 
-| File | Responsibility | Tested |
-| --- | --- | --- |
-| `src/lib/server/evnex.ts` | **Pure.** Window arithmetic, timezone conversion, payload → draft mapping, insert/update/skip planning, token expiry. No `fetch`, no db import. | Vitest, `evnex.test.ts` |
-| `src/lib/server/evnex-client.ts` | The only place that calls `fetch`. Auth exchange, charge-point fetch, session listing, pagination, error mapping. | Not unit tested (the Vitest project is pure logic only) |
-| `src/routes/sessions/+page.server.ts` | New `?/pollEvnex` action wiring db + client + pure logic. | Playwright |
+| File                                  | Responsibility                                                                                                                                  | Tested                                                  |
+| ------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------- |
+| `src/lib/server/evnex.ts`             | **Pure.** Window arithmetic, timezone conversion, payload → draft mapping, insert/update/skip planning, token expiry. No `fetch`, no db import. | Vitest, `evnex.test.ts`                                 |
+| `src/lib/server/evnex-client.ts`      | The only place that calls `fetch`. Auth exchange, charge-point fetch, session listing, pagination, error mapping.                               | Not unit tested (the Vitest project is pure logic only) |
+| `src/routes/sessions/+page.server.ts` | New `?/pollEvnex` action wiring db + client + pure logic.                                                                                       | Playwright                                              |
 
 ### 6.2 The lookback window
 
@@ -288,7 +288,7 @@ it ages out of the window will never be updated by a later poll, and has to be
 completed by hand. Evnex sessions finish within hours, so a 3-day window is
 ample; the setting exists for anyone who wants more slack.
 
-The window is also the *only* bound on response size, since the sessions
+The window is also the _only_ bound on response size, since the sessions
 endpoint has no pagination and requires both `from` and `to` (§4.4).
 
 ```ts
@@ -297,10 +297,7 @@ endpoint has no pagination and requires both `from` and `to` (§4.4).
  * as an instant rather than a local midnight — "the last 3 days" is both
  * simpler to reason about and immune to DST edges.
  */
-export function importWindow(
-	now: Date,
-	lookbackDays: number
-): { from: string; to: string }; // ISO date-times, for the query string
+export function importWindow(now: Date, lookbackDays: number): { from: string; to: string }; // ISO date-times, for the query string
 ```
 
 `planImport` re-checks the window client-side even though the API already
@@ -344,12 +341,7 @@ export interface EvnexSessionPayload {
 }
 
 export type EvnexSessionStatus =
-	| 'Pending'
-	| 'Authorized'
-	| 'Active'
-	| 'Closed'
-	| 'Completed'
-	| 'Invalid';
+	'Pending' | 'Authorized' | 'Active' | 'Closed' | 'Completed' | 'Invalid';
 
 export interface DraftFromEvnex {
 	externalId: string;
@@ -447,6 +439,7 @@ The action, in order:
    **Any 401 on steps 3–4 triggers exactly one re-auth and retry.** A token can
    be revoked or invalidated before its nominal 24 hours are up, so expiry
    arithmetic alone is not sufficient. One retry, then fail — never a loop.
+
 5. Load existing sessions, dismissed IDs, and billing periods from the db.
 6. Call `planImport`.
 7. For each **insert**: assign a billing period with the existing
@@ -460,7 +453,7 @@ The action, in order:
 
 Steps 7 and 8 reuse the existing helpers rather than reimplementing them — a
 session imported today and completed later must resolve against the rate plan
-in effect on *its own* date, which `resolveRatePlan` already guarantees.
+in effect on _its own_ date, which `resolveRatePlan` already guarantees.
 
 ---
 
@@ -470,16 +463,16 @@ in effect on *its own* date, which `resolveRatePlan` already guarantees.
 
 A second `<Card>` below the existing one, with its own `?/saveEvnex` action.
 
-| Field | Control | Notes |
-| --- | --- | --- |
-| Client ID | `Textfield` | |
-| Client secret | `Textfield` `type="password"` | Write-only, see below |
-| Charge point | `Select` | Populated from `GET /v1/charge-points/` by **Test connection** (§4.4) |
-| Import sessions from the last | `Textfield` `type="number"`, suffix "days" | Default 3, min 1 |
-| Enabled | `Switch` | Gates the poll button |
+| Field                         | Control                                    | Notes                                                                 |
+| ----------------------------- | ------------------------------------------ | --------------------------------------------------------------------- |
+| Client ID                     | `Textfield`                                |                                                                       |
+| Client secret                 | `Textfield` `type="password"`              | Write-only, see below                                                 |
+| Charge point                  | `Select`                                   | Populated from `GET /v1/charge-points/` by **Test connection** (§4.4) |
+| Import sessions from the last | `Textfield` `type="number"`, suffix "days" | Default 3, min 1                                                      |
+| Enabled                       | `Switch`                                   | Gates the poll button                                                 |
 
-Plus a **Test connection** button and a status line: *"Connected to
-'Home charger' · last polled 2 hours ago"*, or the last error.
+Plus a **Test connection** button and a status line: _"Connected to
+'Home charger' · last polled 2 hours ago"_, or the last error.
 
 **The client secret must never be sent to the browser.** `settings`'
 `load` currently returns the whole row; the Evnex row needs a redacted
@@ -499,8 +492,8 @@ posting to `?/pollEvnex` with `use:enhance`.
   `/settings`. Disabled-and-explained beats hidden: a user who set it up on
   another device needs to see why it is not working.
 
-On success, a summary: *"Imported 2 drafts, updated 1, skipped 3 already
-imported."* Skips are aggregated by reason rather than listed per session.
+On success, a summary: _"Imported 2 drafts, updated 1, skipped 3 already
+imported."_ Skips are aggregated by reason rather than listed per session.
 
 ### 7.3 Draft rows
 
@@ -523,14 +516,14 @@ odometer, and the row offers whichever fields are missing.
 this is the largest single chunk of work in the plan and is why §10 puts it in
 its own phase.
 
-| File | Change |
-| --- | --- |
-| `src/lib/server/sessions.ts` | `SessionRow.odometerKm` → `number \| null`. `mostRecentOdometer` returns the most recent **non-null** reading. `withEfficiency`: efficiency is null when either this session's or the immediately-preceding session's odometer is null. |
-| `src/lib/dashboard.ts` | Same rule for cost-per-km and km/kWh; sessions with a null odometer are excluded from distance maths. |
-| `src/lib/server/report.ts` | Type as `number \| null`; write a blank cell defensively. In practice never reached — §8.1 blocks the export first. |
-| `src/routes/periods/[id]/+page.server.ts` | `draftSessions` is currently `kwhUsed == null`; becomes `kwhUsed == null \|\| odometerKm == null`. The `?/submit` guard message extends to name whichever is missing. |
-| `src/routes/periods/[id]/export/+server.ts` | The `completedSessions` filter gains the same odometer condition. |
-| `src/routes/sessions/+page.server.ts` | `?/create` unchanged (odometer still required). `?/complete` extended per §7.3. `?/delete` writes a tombstone per §5.2. |
+| File                                        | Change                                                                                                                                                                                                                                  |
+| ------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `src/lib/server/sessions.ts`                | `SessionRow.odometerKm` → `number \| null`. `mostRecentOdometer` returns the most recent **non-null** reading. `withEfficiency`: efficiency is null when either this session's or the immediately-preceding session's odometer is null. |
+| `src/lib/dashboard.ts`                      | Same rule for cost-per-km and km/kWh; sessions with a null odometer are excluded from distance maths.                                                                                                                                   |
+| `src/lib/server/report.ts`                  | Type as `number \| null`; write a blank cell defensively. In practice never reached — §8.1 blocks the export first.                                                                                                                     |
+| `src/routes/periods/[id]/+page.server.ts`   | `draftSessions` is currently `kwhUsed == null`; becomes `kwhUsed == null \|\| odometerKm == null`. The `?/submit` guard message extends to name whichever is missing.                                                                   |
+| `src/routes/periods/[id]/export/+server.ts` | The `completedSessions` filter gains the same odometer condition.                                                                                                                                                                       |
+| `src/routes/sessions/+page.server.ts`       | `?/create` unchanged (odometer still required). `?/complete` extended per §7.3. `?/delete` writes a tombstone per §5.2.                                                                                                                 |
 
 ### 8.1 Why not skip the efficiency changes
 
@@ -538,7 +531,7 @@ It is tempting to treat null odometers as "just a display concern". They are
 not: `withEfficiency` subtracts consecutive odometer readings, so a single null
 in the middle of the chain produces `NaN` for the following session, which
 propagates into the dashboard KPIs. The rule in the table above — null if
-*either* endpoint is null — is the honest one. Carrying the previous reading
+_either_ endpoint is null — is the honest one. Carrying the previous reading
 forward instead would attribute two intervals' distance to one session's kWh
 and silently understate efficiency.
 
@@ -582,14 +575,14 @@ The Evnex API itself is not contacted in tests; `evnex-client.ts` is stubbed.
 
 Each phase lands green (`npm run check`, `npm run lint`, `npm run test`).
 
-| # | Phase | Notes |
-| --- | --- | --- |
-| 1 | Nullable odometer + the §8 ripple | No Evnex code at all. Largest phase; ships a coherent "drafts can be missing an odometer" capability on its own. |
-| 2 | Schema: `evnex_integration`, `evnex_dismissed_sessions`, `external_id` | Migration only, plus the tombstone write in `?/delete`. |
-| 3 | `evnex.ts` pure logic + full Vitest suite | No network, no UI. |
-| 4 | `evnex-client.ts` + `/settings` section + Test connection | First real API contact. Verify §4.3 (bare token, no `Bearer`) against the live API before building on it. |
-| 5 | Poll button + `?/pollEvnex` | The payoff. |
-| 6 | Playwright verification + §13 documentation updates | |
+| #   | Phase                                                                  | Notes                                                                                                            |
+| --- | ---------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
+| 1   | Nullable odometer + the §8 ripple                                      | No Evnex code at all. Largest phase; ships a coherent "drafts can be missing an odometer" capability on its own. |
+| 2   | Schema: `evnex_integration`, `evnex_dismissed_sessions`, `external_id` | Migration only, plus the tombstone write in `?/delete`.                                                          |
+| 3   | `evnex.ts` pure logic + full Vitest suite                              | No network, no UI.                                                                                               |
+| 4   | `evnex-client.ts` + `/settings` section + Test connection              | First real API contact. Verify §4.3 (bare token, no `Bearer`) against the live API before building on it.        |
+| 5   | Poll button + `?/pollEvnex`                                            | The payoff.                                                                                                      |
+| 6   | Playwright verification + §13 documentation updates                    |                                                                                                                  |
 
 No phase is blocked on outstanding questions; the API contract in §4 is
 confirmed. Phase 4 is the first to need real credentials.
@@ -615,14 +608,14 @@ do not conflict and may land in either order. If offline mode lands first:
 
 ## 12. Open decisions
 
-| # | Question | Default if unanswered |
-| --- | --- | --- |
-| 1 | Automatic background polling on app load, in addition to the button? | Manual button only, as specified. Worth revisiting once the failure modes are understood in practice. |
-| 2 | A `source` column (`manual` / `evnex` / `import`) instead of deriving provenance from `externalId != null`? | Derive from `externalId`. Add the column if a second integration ever appears. |
-| 3 | Client secret is stored in plaintext in SQLite. The Evnex docs warn these credentials are "highly sensitive" and grant read — and in some cases write — access to the whole organisation. | Accepted: single-user self-hosted app, the database is gitignored and never leaves the host, and the existing data (home address, vehicle, charging history) is comparably sensitive. Supporting an `EVNEX_CLIENT_SECRET` env-var override instead of the database column is a cheap hardening step if the app is ever hosted less privately. **The secret must never be logged, echoed to the browser (§7.1), or committed.** |
-| 4 | Multiple charge points on one account? | One charge point, chosen at setup. The schema change to support several is a table, not a column, so this is deliberately deferred rather than designed around. |
-| 5 | Should a genuine 0 kWh session (plugged in, no energy drawn) be imported at all? | Import it as a normal session. It is real, it costs $0, and suppressing it would mean the poll silently disagrees with the charger's own history. Revisit if these turn out to be common noise. |
-| 6 | This needs an Evnex **Enterprise** account — the client ID/secret live under "My Organisation" in CP-Link. | Confirm the account tier before starting phase 4. Phases 1–3 are useful regardless, but the feature is dead without API access, and that is worth knowing early. |
+| #   | Question                                                                                                                                                                                  | Default if unanswered                                                                                                                                                                                                                                                                                                                                                                                                          |
+| --- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| 1   | Automatic background polling on app load, in addition to the button?                                                                                                                      | Manual button only, as specified. Worth revisiting once the failure modes are understood in practice.                                                                                                                                                                                                                                                                                                                          |
+| 2   | A `source` column (`manual` / `evnex` / `import`) instead of deriving provenance from `externalId != null`?                                                                               | Derive from `externalId`. Add the column if a second integration ever appears.                                                                                                                                                                                                                                                                                                                                                 |
+| 3   | Client secret is stored in plaintext in SQLite. The Evnex docs warn these credentials are "highly sensitive" and grant read — and in some cases write — access to the whole organisation. | Accepted: single-user self-hosted app, the database is gitignored and never leaves the host, and the existing data (home address, vehicle, charging history) is comparably sensitive. Supporting an `EVNEX_CLIENT_SECRET` env-var override instead of the database column is a cheap hardening step if the app is ever hosted less privately. **The secret must never be logged, echoed to the browser (§7.1), or committed.** |
+| 4   | Multiple charge points on one account?                                                                                                                                                    | One charge point, chosen at setup. The schema change to support several is a table, not a column, so this is deliberately deferred rather than designed around.                                                                                                                                                                                                                                                                |
+| 5   | Should a genuine 0 kWh session (plugged in, no energy drawn) be imported at all?                                                                                                          | Import it as a normal session. It is real, it costs $0, and suppressing it would mean the poll silently disagrees with the charger's own history. Revisit if these turn out to be common noise.                                                                                                                                                                                                                                |
+| 6   | This needs an Evnex **Enterprise** account — the client ID/secret live under "My Organisation" in CP-Link.                                                                                | Confirm the account tier before starting phase 4. Phases 1–3 are useful regardless, but the feature is dead without API access, and that is worth knowing early.                                                                                                                                                                                                                                                               |
 
 ---
 
