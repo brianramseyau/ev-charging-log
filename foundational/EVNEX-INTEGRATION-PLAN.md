@@ -391,13 +391,54 @@ Evnex returns timestamps as `date-time` (UTC). The app stores a local `date`
 Australian evening session lands on the previous day, which can put it in the
 wrong billing period and resolve the wrong peak/off-peak rate.
 
-Convert using the charge point's `attributes.timeZone` (§4.1) via
-`Intl.DateTimeFormat` with `timeZone` and `en-CA` (which formats as
-`YYYY-MM-DD`). No new dependency. The timezone is cached on the integration row
-at setup time and refreshed on each poll's charge-point fetch.
+Convert using the charge point's `attributes.timeZone` (§4.5) via
+`Intl.DateTimeFormat` with `en-AU`, matching the app's Australian audience. No
+new dependency. The timezone is cached on the integration row at setup time and
+refreshed on each poll's charge-point fetch.
+
+**Build the strings from `formatToParts`, never from `.format()`.** `en-AU`
+formats day-first — `format()` on that same timestamp yields `07/08/2026`,
+which is neither the storage format nor unambiguously parseable. Only the
+_parts_ are locale-stable:
+
+```ts
+const parts = Object.fromEntries(
+	new Intl.DateTimeFormat('en-AU', {
+		timeZone,
+		year: 'numeric',
+		month: '2-digit',
+		day: '2-digit',
+		hour: '2-digit',
+		minute: '2-digit',
+		hourCycle: 'h23' // explicit: en-AU is 12-hour by default
+	})
+		.formatToParts(new Date(startDate))
+		.map((p) => [p.type, p.value])
+);
+
+const date = `${parts.year}-${parts.month}-${parts.day}`; // YYYY-MM-DD
+const time = `${parts.hour}:${parts.minute}`; // HH:mm
+```
+
+Assembling explicitly is the point. A shorter version of this exists — `en-CA`
+happens to `format()` straight to `YYYY-MM-DD` — but it relies on a locale
+coincidence, reads as a typo to the next person, and silently produces a
+day-first string if anyone "corrects" the locale to the `en-AU` used everywhere
+else. Assembling from parts states the intended format in the code.
+
+Note `hourCycle: 'h23'`: `en-AU` defaults to 12-hour, so without it a 00:30
+session returns `hour: "12"` plus a separate `dayPeriod: "am"` part. Ignoring
+`dayPeriod` — as the assembly above does — would store that as `12:30` and put
+a midnight charge in the middle of the day, resolving the wrong off-peak rate.
 
 The session's `date`/`time` come from the **start** timestamp — matching the
 manual flow, where the user logs the session when plugging in.
+
+The app has no established locale convention to follow — the only other
+`Intl.DateTimeFormat` call (`src/routes/import/+page.server.ts:36`) passes
+`en-US`, but only to render a month-name billing period label like
+`"July 2026"`, where the locale makes no visible difference. It is not a
+precedent for date storage, and does not need changing.
 
 ### 6.4 Mapping a session
 
@@ -624,6 +665,14 @@ configured test project:
 - `toDraftSession` timezone conversion: a UTC timestamp that falls on the
   previous local day, and one that falls on the next — the §6.3 bug class,
   asserted directly.
+- `toDraftSession` output **format**, not just its value: assert `date` matches
+  `YYYY-MM-DD` and `time` matches `HH:mm`. A day-first `en-AU` regression
+  produces a plausible-looking `07/08/2026` that every value-only assertion
+  waves through.
+- A 00:30 local session stores `time` as `00:30`, not `12:30` — the
+  `hourCycle` trap in §6.3.
+- A session during an Australian DST transition, since `importWindow` works in
+  instants while `date`/`time` are local.
 - `planImport` for each of the eight rules in §6.5, including the
   never-overwrite-a-completed-session case, the `Invalid` skip, and the
   submitted-period skip.
