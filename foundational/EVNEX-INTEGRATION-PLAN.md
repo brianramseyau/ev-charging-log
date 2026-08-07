@@ -36,8 +36,7 @@ implementing agent:
 
 1. Opens `/settings`, finds a new **Evnex integration** heading below the
    existing name/vehicle card, and enters their Evnex email and password —
-   the same ones they use in the Evnex app. If the account has TOTP enabled, a
-   6-digit code is requested next.
+   the same ones they use in the Evnex app.
 2. The app signs in, discards the password, stores the token set, and lists the
    charge points on the account. The user picks theirs. No restart, and the
    desktop build behaves identically (§5.6).
@@ -101,9 +100,12 @@ standard three-token set:
 
 Two implementation notes that matter:
 
-- **MFA.** Evnex accounts can have TOTP enabled, in which case the initial
-  sign-in returns a challenge that must be answered with a 6-digit code
-  (§7.1). This only ever happens at sign-in, never on refresh.
+- **MFA is out of scope.** Evnex accounts _can_ have TOTP enabled, and Cognito
+  would then return a challenge instead of tokens — but this account does not
+  use it, so no challenge UI is built (§7.1). Detect the challenge response and
+  fail with a clear message rather than treating it as an auth error or, worse,
+  reading tokens that are not there. This only ever arises at sign-in, never on
+  refresh.
 - **Refresh.** The refresh token resumes a session with no password and no MFA
   prompt. **Cognito omits the refresh token from a refresh response unless
   rotation is enabled — carry the existing one forward** rather than
@@ -473,7 +475,7 @@ Per the convention in CLAUDE.md, split four ways:
 | File                                  | Responsibility                                                                                                                                  | Tested                                                  |
 | ------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------- |
 | `src/lib/server/evnex.ts`             | **Pure.** Window arithmetic, timezone conversion, payload → draft mapping, insert/update/skip planning, token expiry. No `fetch`, no db import. | Vitest, `evnex.test.ts`                                 |
-| `src/lib/server/evnex-auth.ts`        | Cognito sign-in, MFA challenge, and refresh (§4.2). The only place that knows about Cognito. Returns a token set; never touches the db.         | Not unit tested (network + SDK)                         |
+| `src/lib/server/evnex-auth.ts`        | Cognito sign-in and refresh (§4.2). The only place that knows about Cognito. Returns a token set; never touches the db.                         | Not unit tested (network + SDK)                         |
 | `src/lib/server/evnex-client.ts`      | The only place that calls `fetch`. Auth exchange, charge-point fetch, session listing, error mapping.                                           | Not unit tested (the Vitest project is pure logic only) |
 | `src/routes/sessions/+page.server.ts` | New `?/pollEvnex` action wiring db + client + pure logic.                                                                                       | Playwright                                              |
 
@@ -780,10 +782,12 @@ true when a refresh token exists.
 signs in (§4.2), stores the token set, discards the password, fetches
 `GET /v2/apps/user` for `orgId`, and lists the charge points.
 
-**If Cognito returns an MFA challenge**, the card swaps to a single 6-digit
-code field and completes the challenge. The Cognito session token for the
-challenge is short-lived and must be held for that one round trip only — never
-written to the database.
+**No MFA state.** The account has TOTP disabled (§12), so the challenge flow is
+deliberately not built. If Cognito returns a challenge anyway, surface it as
+_"This Evnex account requires two-factor authentication, which this app does
+not yet support"_ — an accurate dead end beats a generic "sign-in failed" that
+sends the user hunting for a wrong password. Adding the flow later is one extra
+field and one extra call, not a redesign.
 
 #### Connected
 
@@ -1034,10 +1038,10 @@ light and dark**:
 - `/settings` with the new heading — SMUI `Select` and `Switch` are new
   controls on this page and MDC's resets have caused real regressions here
   before.
-- `/settings` in each §7.1 state — signed out, MFA challenge, connected, and
-  the `auth_failed` reconnect prompt — since the card renders different
-  controls in each. All four are reachable by seeding `evnex_integration`
-  directly; none needs a live Evnex account.
+- `/settings` in each §7.1 state — signed out, connected, and the
+  `auth_failed` reconnect prompt — since the card renders different controls in
+  each. All three are reachable by seeding `evnex_integration` directly; none
+  needs a live Evnex account.
 - `/sessions` poll button in both disabled (unconfigured) and enabled states.
 - A draft row showing both **Add kWh** and **Add odometer**.
 - The §7.4 chip: a manual row and an imported row **in the same screenshot**,
@@ -1064,14 +1068,14 @@ either suite above and has to be done deliberately:
 
 Each phase lands green (`npm run check`, `npm run lint`, `npm run test`).
 
-| #   | Phase                                                                  | Notes                                                                                                                                                                                                                                                                                                                                                         |
-| --- | ---------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 1   | Nullable odometer + the §8 ripple + the §5.5 foreign-key fix           | No Evnex code at all. Largest phase; ships a coherent "drafts can be missing an odometer" capability on its own.                                                                                                                                                                                                                                              |
-| 2   | Schema: `evnex_integration`, `evnex_dismissed_sessions`, `external_id` | Migration only, plus the tombstone write in `?/delete`.                                                                                                                                                                                                                                                                                                       |
-| 3   | `evnex.ts` pure logic + full Vitest suite                              | No network, no UI.                                                                                                                                                                                                                                                                                                                                            |
-| 4   | `evnex-auth.ts` + `evnex-client.ts` + the `/settings` sign-in flow     | First real API contact, and the riskiest phase. **Spike the Cognito sign-in against a real account before anything else** — it decides the AWS dependency (§6.1) and confirms whether MFA is in play. Then verify §4.3 (bare access token, no `Bearer`) and capture one real sessions response as a test fixture. No deployment-config work: §5.6 removed it. |
-| 5   | Poll button + `?/pollEvnex`                                            | The payoff.                                                                                                                                                                                                                                                                                                                                                   |
-| 6   | Playwright verification + §13 documentation updates                    |                                                                                                                                                                                                                                                                                                                                                               |
+| #   | Phase                                                                  | Notes                                                                                                                                                                                                                                                                                                                                        |
+| --- | ---------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1   | Nullable odometer + the §8 ripple + the §5.5 foreign-key fix           | No Evnex code at all. Largest phase; ships a coherent "drafts can be missing an odometer" capability on its own.                                                                                                                                                                                                                             |
+| 2   | Schema: `evnex_integration`, `evnex_dismissed_sessions`, `external_id` | Migration only, plus the tombstone write in `?/delete`.                                                                                                                                                                                                                                                                                      |
+| 3   | `evnex.ts` pure logic + full Vitest suite                              | No network, no UI.                                                                                                                                                                                                                                                                                                                           |
+| 4   | `evnex-auth.ts` + `evnex-client.ts` + the `/settings` sign-in flow     | First real API contact, and the riskiest phase. **Spike the Cognito sign-in against the real account before anything else** — it decides the AWS dependency (§6.1). Then verify §4.3 (bare access token, no `Bearer`) and capture one real sessions response as a test fixture. No MFA flow, and no deployment-config work: §5.6 removed it. |
+| 5   | Poll button + `?/pollEvnex`                                            | The payoff.                                                                                                                                                                                                                                                                                                                                  |
+| 6   | Playwright verification + §13 documentation updates                    |                                                                                                                                                                                                                                                                                                                                              |
 
 No phase is blocked on outstanding questions; the API contract in §4 is
 confirmed. Phase 4 is the first to need real credentials.
@@ -1103,8 +1107,7 @@ do not conflict and may land in either order. If offline mode lands first:
 | 2   | A `source` column (`manual` / `evnex` / `import`) instead of deriving provenance from `externalId != null`?                                                                                                                                                  | Derive from `externalId`. Add the column if a second integration ever appears.                                                                                                                                                                                         |
 | 3   | Multiple charge points on one account?                                                                                                                                                                                                                       | One charge point, chosen at setup. The schema change to support several is a table, not a column, so this is deliberately deferred rather than designed around.                                                                                                        |
 | 4   | Should a genuine 0 kWh session (plugged in, no energy drawn) be imported at all? **Distinct from an `Invalid` session**, which is now tombstoned on sight (§6.5 rule 1) — this row is only about a `Completed` session whose meter delta happens to be zero. | Import it as a normal session. It is real, it costs $0, and suppressing it would mean the poll silently disagrees with the charger's own history. If these turn out to be noise too, the tombstone mechanism from §6.5 applies unchanged — only the predicate differs. |
-| 5   | Does the Evnex account have **TOTP MFA** enabled? It changes phase 4's sign-in flow (§7.1) from one form to two.                                                                                                                                             | Build the challenge path regardless — `python-evnex` supports it, so it is reachable, and discovering it mid-implementation is worse than a state that goes unused.                                                                                                    |
-| 6   | Evnex's exact brand green (§7.4). `#15803d` is a placeholder — the documentation host was blocked by egress policy, so the real hex could not be read.                                                                                                       | Ship `#15803d`. If the brand value is a bright lime it cannot be used as the light-mode foreground (1.84:1 vs a 3.07:1 baseline); keep it for the dark tint and darken it for light.                                                                                   |
+| 5   | Evnex's exact brand green (§7.4). `#15803d` is a placeholder — the documentation host was blocked by egress policy, so the real hex could not be read.                                                                                                       | Ship `#15803d`. If the brand value is a bright lime it cannot be used as the light-mode foreground (1.84:1 vs a 3.07:1 baseline); keep it for the dark tint and darken it for light.                                                                                   |
 
 **Resolved:** which API, and therefore how credentials work. Earlier drafts
 targeted the Enterprise API and went through a client-secret-in-SQLite phase,
@@ -1116,6 +1119,11 @@ and the token set lives in the database (§5.6).
 **Resolved:** the Enterprise-account blocker. It no longer applies — the
 consumer API works with an ordinary Evnex login, which is what made the switch
 worth making.
+
+**Resolved:** MFA. The account has TOTP disabled, so the challenge flow is not
+built — only guarded against (§4.2, §7.1). Enabling TOTP on the Evnex account
+later would break sign-in until that flow is added, which is the one thing
+worth remembering about this decision.
 
 **New risk, in exchange:** the API is unofficial and can change without notice
 (§4.0). That is a permanent operating condition of this feature, not a
