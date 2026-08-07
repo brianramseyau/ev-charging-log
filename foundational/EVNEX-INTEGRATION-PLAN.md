@@ -213,20 +213,35 @@ export const evnexIntegration = sqliteTable('evnex_integration', {
 
 ### 5.2 New table: `evnex_dismissed_sessions`
 
-A tombstone list. Without it, deleting an unwanted imported draft is futile:
-the next poll sees the same Evnex session still inside the lookback window and
-re-imports it. This is not a hypothetical — it fires the first time a user
-deletes a draft.
+A tombstone list of Evnex sessions that must never be (re-)imported. Without
+it, deleting an unwanted imported draft is futile: the next poll sees the same
+Evnex session still inside the lookback window and re-imports it. This is not a
+hypothetical — it fires the first time a user deletes a draft.
 
 ```ts
 export const evnexDismissedSessions = sqliteTable('evnex_dismissed_sessions', {
 	externalId: text('external_id').primaryKey(),
-	dismissedAt: text('dismissed_at').notNull()
+	dismissedAt: text('dismissed_at').notNull(),
+	// Why this session is tombstoned. Not load-bearing for the import decision
+	// — presence in this table is enough — but it is the only way to answer
+	// "why does this session never appear?" without guessing.
+	reason: text('reason', { enum: ['user_deleted', 'invalid'] }).notNull()
 });
 ```
 
-The existing `?/delete` action on `/sessions` writes a row here whenever the
-deleted session has a non-null `externalId`.
+Two writers:
+
+- The existing `?/delete` action on `/sessions`, whenever the deleted session
+  has a non-null `externalId` — reason `user_deleted`.
+- The poll itself, for any session the charger reports as `Invalid` — reason
+  `invalid`, written on first sight (§6.5).
+
+Both use an ignore-on-conflict insert, since a poll will keep re-encountering
+the same tombstoned session until it ages out of the window.
+
+The table is bounded in practice: it gains a row only when the user deletes an
+imported session or the charger produces an invalid one, and nothing ever polls
+outside the lookback window.
 
 ### 5.3 Changes to `charging_sessions`
 
@@ -551,11 +566,14 @@ export function planImport(
 ): {
 	insert: DraftFromEvnex[];
 	update: { id: number; kwhUsed: number }[];
+	/** External IDs to tombstone (§5.2), reason `invalid`. */
+	tombstone: string[];
 	skipped: { externalId: string; reason: SkipReason }[];
 };
 
 type SkipReason =
 	| 'invalid'
+	| 'invalid_after_import'
 	| 'outside_window'
 	| 'dismissed'
 	| 'already_complete'
@@ -565,10 +583,23 @@ type SkipReason =
 
 Rules, in order:
 
-1. `sessionStatus === 'Invalid'` → `invalid`. Never import; an Invalid session
-   did not deliver energy and must not reach a lease report.
+1. `sessionStatus === 'Invalid'` → **tombstone immediately** and skip. Invalid
+   sessions occur in normal operation, and an Invalid session did not deliver
+   energy, so it must never reach a lease report. Two sub-cases:
+   - **No existing row** → `invalid`. Tombstoned on first sight, so it is
+     dismissed once rather than re-evaluated on every poll until it ages out of
+     the window.
+   - **An existing row** → `invalid_after_import`, still tombstoned. This is
+     reachable by design: a session polled while `Active` is imported as a
+     draft, and the charger can mark it `Invalid` afterwards. **Do not delete
+     the existing row** — the user may have already added an odometer, and it
+     may sit in a submitted period. Report it instead (§7.2) and let them
+     decide. The tombstone is still correct: if they do delete it, it must not
+     come back.
 2. Outside the lookback window → `outside_window`.
-3. `externalId` in `dismissed` → `dismissed`.
+3. `externalId` in `dismissed` → `dismissed`. Tombstones written by rule 1 land
+   here on subsequent polls, which is why rule 1's insert must ignore
+   conflicts rather than error.
 4. No existing row with this `externalId` → **insert** as a draft, whether or
    not charging has finished. An in-progress session is inserted with
    `kwhUsed: null`; a later poll fills it in.
@@ -585,7 +616,8 @@ not equivalent: `sessionStatus` describes the session's lifecycle while the
 meter delta describes whether an energy figure actually exists. A `Closed`
 session may still be missing `meterStop`, and rule 7 keying off `energyKwh`
 handles that without enumerating which statuses do or do not carry a meter
-reading. `sessionStatus` is used only for rule 1.
+reading. `sessionStatus` is used only for rule 1 — the one place where the
+lifecycle, not the meter, is the whole question.
 
 An `energyKwh` of `0` — plugged in, no energy drawn — is falsy in JavaScript
 and will be silently treated as "still charging" by a careless `if (energyKwh)`.
@@ -620,18 +652,29 @@ The action, in order:
 
 5. Load existing sessions, dismissed IDs, and billing periods from the db.
 6. Call `planImport`.
-7. For each **insert**: assign a billing period with the existing
+7. For each **tombstone**: insert into `evnex_dismissed_sessions` with reason
+   `invalid`, ignoring conflicts (`onConflictDoNothing`) — a tombstoned session
+   keeps reappearing in the API response until it ages out of the window, so a
+   plain insert would throw on the second poll.
+8. For each **insert**: assign a billing period with the existing
    `findBillingPeriodId`, and insert. Cost stays null — there is no kWh yet,
    and no odometer.
-8. For each **update**: set `kwhUsed`, and recompute `cost` with the existing
+9. For each **update**: set `kwhUsed`, and recompute `cost` with the existing
    `resolveRatePlan` + `calculateSessionCost`, exactly as `?/complete` does.
    The session remains a draft until its odometer is filled in.
-9. Record `lastPolledAt` / `lastPollStatus` / `lastPollError`.
-10. Return `{ inserted, updated, skipped }` counts for the UI summary.
+10. Record `lastPolledAt` / `lastPollStatus` / `lastPollError`.
+11. Return `{ inserted, updated, tombstoned, skipped }` counts for the UI
+    summary, keeping any `invalid_after_import` entries distinct — that one
+    needs the user's attention, the rest are noise.
 
-Steps 7 and 8 reuse the existing helpers rather than reimplementing them — a
+Steps 8 and 9 reuse the existing helpers rather than reimplementing them — a
 session imported today and completed later must resolve against the rate plan
 in effect on _its own_ date, which `resolveRatePlan` already guarantees.
+
+Steps 7–9 should share one transaction. A poll that tombstones a session and
+then fails partway through the inserts would otherwise leave the tombstone
+behind without the corresponding work, and the next poll would treat the
+session as already dismissed.
 
 ---
 
@@ -687,6 +730,16 @@ posting to `?/pollEvnex` with `use:enhance`.
 
 On success, a summary: _"Imported 2 drafts, updated 1, skipped 3 already
 imported."_ Skips are aggregated by reason rather than listed per session.
+
+Two outcomes get their own line rather than being folded into the aggregate,
+because they are the only ones a user can act on:
+
+- **Invalid sessions dismissed** — _"1 invalid session dismissed."_ Brief, but
+  it explains why a session visible in the Evnex app never appears here.
+- **`invalid_after_import`** — _"1 previously imported session was marked
+  invalid by the charger — review it."_ This one names the session (date and
+  time) and is styled as a warning, since a bad row is sitting in the history
+  and possibly in a billing period. Nothing is deleted automatically (§6.5).
 
 ### 7.3 Draft rows
 
@@ -844,9 +897,16 @@ configured test project:
   `hourCycle` trap in §6.3.
 - A session during an Australian DST transition, since `importWindow` works in
   instants while `date`/`time` are local.
-- `planImport` for each of the eight rules in §6.5, including the
-  never-overwrite-a-completed-session case, the `Invalid` skip, and the
-  submitted-period skip.
+- `planImport` for each of the rules in §6.5, including the
+  never-overwrite-a-completed-session case and the submitted-period skip.
+- **`Invalid` tombstoning**, both sub-cases: an unseen Invalid session returns
+  a tombstone and skips as `invalid`; an Invalid session that already has a row
+  returns a tombstone, skips as `invalid_after_import`, and appears in neither
+  `insert` nor `update` — asserting the existing row is left alone is the point
+  of the test.
+- An Invalid session already present in `dismissed` still plans cleanly (it is
+  simply skipped), since rule 1 precedes rule 3 and will re-emit the tombstone
+  every poll until it ages out.
 - **`energyKwh === 0` is treated as present, not as still-charging** — the
   falsy trap in §6.5, which a naive implementation passes every other test
   while failing.
@@ -921,13 +981,13 @@ do not conflict and may land in either order. If offline mode lands first:
 
 ## 12. Open decisions
 
-| #   | Question                                                                                                    | Default if unanswered                                                                                                                                                                           |
-| --- | ----------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 1   | Automatic background polling on app load, in addition to the button?                                        | Manual button only, as specified. Worth revisiting once the failure modes are understood in practice.                                                                                           |
-| 2   | A `source` column (`manual` / `evnex` / `import`) instead of deriving provenance from `externalId != null`? | Derive from `externalId`. Add the column if a second integration ever appears.                                                                                                                  |
-| 3   | Multiple charge points on one account?                                                                      | One charge point, chosen at setup. The schema change to support several is a table, not a column, so this is deliberately deferred rather than designed around.                                 |
-| 4   | Should a genuine 0 kWh session (plugged in, no energy drawn) be imported at all?                            | Import it as a normal session. It is real, it costs $0, and suppressing it would mean the poll silently disagrees with the charger's own history. Revisit if these turn out to be common noise. |
-| 5   | This needs an Evnex **Enterprise** account — the client ID/secret live under "My Organisation" in CP-Link.  | Confirm the account tier before starting phase 4. Phases 1–3 are useful regardless, but the feature is dead without API access, and that is worth knowing early.                                |
+| #   | Question                                                                                                                                                                                                                                                     | Default if unanswered                                                                                                                                                                                                                                                  |
+| --- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1   | Automatic background polling on app load, in addition to the button?                                                                                                                                                                                         | Manual button only, as specified. Worth revisiting once the failure modes are understood in practice.                                                                                                                                                                  |
+| 2   | A `source` column (`manual` / `evnex` / `import`) instead of deriving provenance from `externalId != null`?                                                                                                                                                  | Derive from `externalId`. Add the column if a second integration ever appears.                                                                                                                                                                                         |
+| 3   | Multiple charge points on one account?                                                                                                                                                                                                                       | One charge point, chosen at setup. The schema change to support several is a table, not a column, so this is deliberately deferred rather than designed around.                                                                                                        |
+| 4   | Should a genuine 0 kWh session (plugged in, no energy drawn) be imported at all? **Distinct from an `Invalid` session**, which is now tombstoned on sight (§6.5 rule 1) — this row is only about a `Completed` session whose meter delta happens to be zero. | Import it as a normal session. It is real, it costs $0, and suppressing it would mean the poll silently disagrees with the charger's own history. If these turn out to be noise too, the tombstone mechanism from §6.5 applies unchanged — only the predicate differs. |
+| 5   | This needs an Evnex **Enterprise** account — the client ID/secret live under "My Organisation" in CP-Link.                                                                                                                                                   | Confirm the account tier before starting phase 4. Phases 1–3 are useful regardless, but the feature is dead without API access, and that is worth knowing early.                                                                                                       |
 
 **Resolved:** credential storage. Earlier drafts stored the client secret in
 SQLite. It now comes from the environment (§5.6) and is never persisted, so the
