@@ -117,6 +117,50 @@ Cognito pool default of 30 days is typical — but they do eventually expire,
 which is what makes the reconnect flow in §7.1 necessary rather than
 theoretical.
 
+#### Use SRP, matching `python-evnex`
+
+`python-evnex` constructs `Cognito(user_pool_id, client_id, username=None)` and
+calls `cognito.authenticate(password=password)` **with no `auth_flow`
+argument**, so it takes pycognito's default: **SRP** (`USER_SRP_AUTH`). Refresh
+is `cognito.renew_access_token()` — `REFRESH_TOKEN_AUTH`.
+
+Mirror that. The JavaScript equivalent is
+**[`amazon-cognito-identity-js`](https://www.npmjs.com/package/amazon-cognito-identity-js)**,
+whose `CognitoUser.authenticateUser()` performs the same SRP exchange:
+
+```ts
+const pool = new CognitoUserPool({
+	UserPoolId: 'ap-southeast-2_zWnqo6ASv',
+	ClientId: 'rol3lsv2vg41783550i18r7vi',
+	Storage: memoryStorage // see below
+});
+new CognitoUser({ Username: email, Pool: pool }).authenticateUser(
+	new AuthenticationDetails({ Username: email, Password: password }),
+	{ onSuccess, onFailure, totpRequired /* → the §7.1 dead end */ }
+);
+```
+
+Refreshing uses `cognitoUser.refreshSession(new CognitoRefreshToken({ RefreshToken }), cb)`.
+
+**Do not substitute `USER_PASSWORD_AUTH`** via the AWS SDK's `InitiateAuth`,
+even though it is less code. The app client belongs to Evnex, and
+`ALLOW_USER_PASSWORD_AUTH` is an explicit per-client setting that is commonly
+left off — if it is off, that flow is rejected outright. SRP is demonstrably
+permitted, because it is what the mobile app and `python-evnex` both use.
+Hand-rolling SRP is likewise pointless; it is fiddly cryptography with a
+maintained library available.
+
+A side benefit worth knowing: under SRP the password is **never transmitted**,
+only a zero-knowledge proof of it. Combined with discarding the password after
+sign-in (§5.6), it never persists anywhere in this system.
+
+**Node gotcha:** `amazon-cognito-identity-js` targets browsers and defaults to
+`localStorage`, which does not exist server-side. Pass a small in-memory
+`Storage` shim to `CognitoUserPool` — the tokens are persisted to the database
+by the caller, so the library's own storage only needs to survive the sign-in
+call. Global `fetch` is available on the project's Node 24, so no polyfill is
+needed.
+
 ### 4.3 Using the token — the `Bearer` trap
 
 > Requests to `client-api.evnex.io` send the **bare access token**:
@@ -481,10 +525,10 @@ Per the convention in CLAUDE.md, split four ways:
 
 Keeping Cognito in its own module matters more than usual here: it is the part
 most likely to need swapping if Evnex changes the mobile app's auth (§4.0), and
-it is the only place that needs an AWS dependency. Decide early whether that is
-`amazon-cognito-identity-js`, the `@aws-sdk/client-cognito-identity-provider`
-`InitiateAuth` call, or a hand-rolled SRP exchange — it is the single largest
-new dependency this feature introduces, in an app that currently has none.
+the only place that needs the `amazon-cognito-identity-js` dependency (§4.2) —
+the largest this feature introduces. Nothing outside `evnex-auth.ts` should
+import it, or know that Cognito is involved at all; the rest of the code sees a
+token set.
 
 ### 6.2 The lookback window
 
@@ -1068,14 +1112,14 @@ either suite above and has to be done deliberately:
 
 Each phase lands green (`npm run check`, `npm run lint`, `npm run test`).
 
-| #   | Phase                                                                  | Notes                                                                                                                                                                                                                                                                                                                                        |
-| --- | ---------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 1   | Nullable odometer + the §8 ripple + the §5.5 foreign-key fix           | No Evnex code at all. Largest phase; ships a coherent "drafts can be missing an odometer" capability on its own.                                                                                                                                                                                                                             |
-| 2   | Schema: `evnex_integration`, `evnex_dismissed_sessions`, `external_id` | Migration only, plus the tombstone write in `?/delete`.                                                                                                                                                                                                                                                                                      |
-| 3   | `evnex.ts` pure logic + full Vitest suite                              | No network, no UI.                                                                                                                                                                                                                                                                                                                           |
-| 4   | `evnex-auth.ts` + `evnex-client.ts` + the `/settings` sign-in flow     | First real API contact, and the riskiest phase. **Spike the Cognito sign-in against the real account before anything else** — it decides the AWS dependency (§6.1). Then verify §4.3 (bare access token, no `Bearer`) and capture one real sessions response as a test fixture. No MFA flow, and no deployment-config work: §5.6 removed it. |
-| 5   | Poll button + `?/pollEvnex`                                            | The payoff.                                                                                                                                                                                                                                                                                                                                  |
-| 6   | Playwright verification + §13 documentation updates                    |                                                                                                                                                                                                                                                                                                                                              |
+| #   | Phase                                                                  | Notes                                                                                                                                                                                                                                                                                                                                                                                                    |
+| --- | ---------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1   | Nullable odometer + the §8 ripple + the §5.5 foreign-key fix           | No Evnex code at all. Largest phase; ships a coherent "drafts can be missing an odometer" capability on its own.                                                                                                                                                                                                                                                                                         |
+| 2   | Schema: `evnex_integration`, `evnex_dismissed_sessions`, `external_id` | Migration only, plus the tombstone write in `?/delete`.                                                                                                                                                                                                                                                                                                                                                  |
+| 3   | `evnex.ts` pure logic + full Vitest suite                              | No network, no UI.                                                                                                                                                                                                                                                                                                                                                                                       |
+| 4   | `evnex-auth.ts` + `evnex-client.ts` + the `/settings` sign-in flow     | First real API contact, and the riskiest phase. **Spike the SRP sign-in against the real account before anything else** — the flow and library are settled (§4.2), but the Node `Storage` shim and the bare-token header are the two things most likely to bite. Then verify §4.3 and capture one real sessions response as a test fixture. No MFA flow, and no deployment-config work: §5.6 removed it. |
+| 5   | Poll button + `?/pollEvnex`                                            | The payoff.                                                                                                                                                                                                                                                                                                                                                                                              |
+| 6   | Playwright verification + §13 documentation updates                    |                                                                                                                                                                                                                                                                                                                                                                                                          |
 
 No phase is blocked on outstanding questions; the API contract in §4 is
 confirmed. Phase 4 is the first to need real credentials.
@@ -1148,6 +1192,11 @@ Owed once this lands:
   an ordinary Evnex account, configured entirely through `/settings`, no
   environment variables. Worth stating plainly that it uses an undocumented API
   and may break.
+- **CLAUDE.md "Stack specifics"** — record `amazon-cognito-identity-js` and,
+  more importantly, that it is confined to `evnex-auth.ts` and mirrors
+  `python-evnex`'s SRP flow (§4.2). A future contributor "simplifying" it to
+  `USER_PASSWORD_AUTH` would break sign-in against an app client that does not
+  permit that flow.
 - **No deployment-config changes.** `.env.example`, the `Dockerfile`,
   `unraid/ev-charging-log.xml`, `electron/main.cjs` and PLAN.md §11.5 are all
   untouched by this feature — earlier revisions of this plan required edits to
