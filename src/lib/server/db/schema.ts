@@ -34,7 +34,10 @@ export const chargingSessions = sqliteTable('charging_sessions', {
 	kind: text('kind', { enum: ['home', 'public'] }).notNull(),
 	date: text('date').notNull(),
 	time: text('time').notNull(),
-	odometerKm: real('odometer_km').notNull(),
+	// Null only on a session imported from the Evnex charger integration
+	// (externalId set) — the charger has no way to know the odometer. Manual
+	// creation still requires it; enforced in code, not a CHECK constraint.
+	odometerKm: real('odometer_km'),
 	// Null means the session is a draft: kWh isn't known until charging finishes,
 	// so a session can be logged with just what's known when plugging in
 	// (date/time/odometer/location) and completed later by filling this in.

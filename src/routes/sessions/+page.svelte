@@ -288,7 +288,9 @@
 					{/if}
 				</div>
 				<div class="session-row__details">
-					<span>{session.odometerKm.toLocaleString()} km</span>
+					{#if session.odometerKm != null}
+						<span>{session.odometerKm.toLocaleString()} km</span>
+					{/if}
 					{#if session.kwhUsed != null}
 						<span>{session.kwhUsed} kWh</span>
 					{/if}

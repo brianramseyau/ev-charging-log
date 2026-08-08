@@ -10,7 +10,13 @@ import {
 	withEfficiency
 } from './sessions';
 
-const s = (id: number, date: string, time: string, odometerKm: number, kwhUsed: number | null) => ({
+const s = (
+	id: number,
+	date: string,
+	time: string,
+	odometerKm: number | null,
+	kwhUsed: number | null
+) => ({
 	id,
 	date,
 	time,
@@ -45,6 +51,19 @@ describe('mostRecentOdometer', () => {
 	it('returns the odometer of the chronologically latest session', () => {
 		const rows = [s(1, '2026-08-01', '09:00', 1000, 10), s(2, '2026-08-05', '09:00', 1200, 10)];
 		expect(mostRecentOdometer(rows)).toBe(1200);
+	});
+
+	it('skips a null-odometer row to find the next most recent real reading', () => {
+		const rows = [
+			s(1, '2026-08-01', '09:00', 1000, 10),
+			s(2, '2026-08-05', '09:00', null, null) // draft, odometer not yet known
+		];
+		expect(mostRecentOdometer(rows)).toBe(1000);
+	});
+
+	it('returns null when every row has a null odometer', () => {
+		const rows = [s(1, '2026-08-01', '09:00', null, null), s(2, '2026-08-05', '09:00', null, null)];
+		expect(mostRecentOdometer(rows)).toBeNull();
 	});
 });
 
@@ -132,6 +151,31 @@ describe('withEfficiency', () => {
 			s(1, '2026-08-01', '09:00', 1000, null), // draft
 			s(2, '2026-08-05', '09:00', 1150, 15)
 		];
+		const result = withEfficiency(rows);
+		expect(result[1].efficiencyKmPerKwh).toBeCloseTo(10, 5); // (1150-1000)/15
+	});
+
+	it('is null when the current session has no odometer reading yet', () => {
+		const rows = [
+			s(1, '2026-08-01', '09:00', 1000, 10),
+			s(2, '2026-08-05', '09:00', null, 15) // odometer not yet reported (e.g. Evnex draft)
+		];
+		const result = withEfficiency(rows);
+		expect(result[1].efficiencyKmPerKwh).toBeNull();
+	});
+
+	it('is null when the immediately-preceding session has no odometer reading, without carrying forward an earlier one', () => {
+		const rows = [
+			s(1, '2026-08-01', '09:00', 1000, 10),
+			s(2, '2026-08-03', '09:00', null, 5), // odometer not yet reported
+			s(3, '2026-08-05', '09:00', 1150, 15)
+		];
+		const result = withEfficiency(rows);
+		expect(result[2].efficiencyKmPerKwh).toBeNull();
+	});
+
+	it('computes correctly for a normal pair with two non-null odometers', () => {
+		const rows = [s(1, '2026-08-01', '09:00', 1000, 10), s(2, '2026-08-05', '09:00', 1150, 15)];
 		const result = withEfficiency(rows);
 		expect(result[1].efficiencyKmPerKwh).toBeCloseTo(10, 5); // (1150-1000)/15
 	});

@@ -12,7 +12,7 @@ import { join } from 'node:path';
 export interface ReportSession {
 	time: string;
 	date: string;
-	odometerKm: number;
+	odometerKm: number | null;
 	kwhUsed: number;
 	location: string;
 	cost: number | null;

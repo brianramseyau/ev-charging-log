@@ -11,7 +11,7 @@ export interface DashboardSession {
 	kind: SessionKind;
 	date: string; // ISO date, "YYYY-MM-DD"
 	time: string; // "HH:mm"
-	odometerKm: number;
+	odometerKm: number | null; // null for draft sessions where the charger hasn't reported an odometer reading yet
 	kwhUsed: number;
 	cost: number | null;
 	billingPeriodId: number | null;
@@ -44,7 +44,10 @@ function byDateTime(a: DashboardSession, b: DashboardSession): number {
  * used at this session (PLAN.md §10). The very first session overall has no
  * predecessor to diff against and is skipped, and any session whose distance
  * or kWh can't produce a sane ratio (odometer went backwards, no kWh recorded)
- * is skipped rather than plotted as a misleading spike.
+ * is skipped rather than plotted as a misleading spike. Same rule for a null
+ * odometer: if this session's or the immediately-preceding session's
+ * odometer reading isn't known yet (e.g. an unresolved Evnex draft), the
+ * session is skipped rather than carrying forward an earlier reading.
  */
 export function computeEfficiencySeries(sessions: DashboardSession[]): EfficiencyPoint[] {
 	const sorted = [...sessions].sort(byDateTime);
@@ -56,6 +59,7 @@ export function computeEfficiencySeries(sessions: DashboardSession[]): Efficienc
 		if (!(current.kwhUsed > 0)) continue;
 
 		const previous = sorted[i - 1];
+		if (current.odometerKm == null || previous.odometerKm == null) continue;
 		const deltaKm = current.odometerKm - previous.odometerKm;
 		if (!Number.isFinite(deltaKm) || deltaKm < 0) continue;
 

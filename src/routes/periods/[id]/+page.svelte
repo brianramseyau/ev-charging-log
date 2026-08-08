@@ -140,7 +140,7 @@
 					<div class="session-row__details">
 						<span class="session-row__field">
 							<Icon path={mdiSpeedometer} size={16} />
-							{s.odometerKm.toLocaleString()} km
+							{#if s.odometerKm != null}{s.odometerKm.toLocaleString()} km{/if}
 						</span>
 						<span class="session-row__field">
 							<Icon path={mdiLightningBolt} size={16} />
@@ -178,7 +178,7 @@
 					<div class="session-row__details">
 						<span class="session-row__field">
 							<Icon path={mdiSpeedometer} size={16} />
-							{s.odometerKm.toLocaleString()} km
+							{#if s.odometerKm != null}{s.odometerKm.toLocaleString()} km{/if}
 						</span>
 						<span class="session-row__field">
 							<Icon path={mdiLightningBolt} size={16} />
