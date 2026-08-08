@@ -44,5 +44,57 @@ export const chargingSessions = sqliteTable('charging_sessions', {
 	kwhUsed: real('kwh_used'),
 	location: text('location').notNull(),
 	cost: real('cost'), // computed at save time from the active rate plan (home sessions)
-	notes: text('notes')
+	notes: text('notes'),
+	// Evnex session UUID (see foundational/EVNEX-INTEGRATION-PLAN.md §5.3). Null for
+	// manually-logged sessions. Unique so a repeat poll can't double-insert if two
+	// polls race. SQLite permits multiple NULLs in a UNIQUE index, so this is fine.
+	externalId: text('external_id').unique()
+});
+
+// Single-row, same pattern as `settings`. Kept separate because `settings` is report
+// identity (name, vehicle, address) and this is integration state with a very
+// different lifecycle. See EVNEX-INTEGRATION-PLAN.md §5.1.
+export const evnexIntegration = sqliteTable('evnex_integration', {
+	id: integer('id').primaryKey({ autoIncrement: true }),
+
+	// User-chosen, via /settings. The password is deliberately absent: it is used
+	// once at sign-in and never persisted.
+	email: text('email'), // shown in /settings so the user knows which account
+	orgId: text('org_id'), // from GET /v2/apps/user, cached
+	chargePointId: text('charge_point_id'), // UUID of the home charger
+	chargePointName: text('charge_point_name'), // cached for display
+	chargePointTimeZone: text('charge_point_time_zone'), // IANA, cached
+	importLookbackDays: integer('import_lookback_days').notNull().default(3),
+	enabled: integer('enabled', { mode: 'boolean' }).notNull().default(false),
+
+	// Generated at sign-in, never user-entered, never sent to the client. Cognito
+	// token set. The refresh token is a real credential — it can mint access tokens
+	// for as long as the pool allows, so it is as sensitive as the password and must
+	// never be logged or rendered.
+	accessToken: text('access_token'),
+	accessTokenExpiresAt: text('access_token_expires_at'), // ISO datetime
+	refreshToken: text('refresh_token'),
+
+	// Last poll outcome, for the status line in /settings
+	lastPolledAt: text('last_polled_at'),
+	lastPollStatus: text('last_poll_status', {
+		enum: ['ok', 'auth_failed', 'network_error', 'api_error']
+	}),
+	lastPollError: text('last_poll_error')
+});
+
+// A tombstone list of Evnex sessions that must never be (re-)imported. Without it,
+// deleting an unwanted imported draft is futile: the next poll sees the same Evnex
+// session still inside the lookback window and re-imports it. Deliberately has NO
+// foreign key to charging_sessions.externalId — its entire purpose is to outlive the
+// session row it describes, and an FK (especially ON DELETE CASCADE) would delete the
+// tombstone at the exact moment it starts being needed. See EVNEX-INTEGRATION-PLAN.md
+// §5.2.
+export const evnexDismissedSessions = sqliteTable('evnex_dismissed_sessions', {
+	externalId: text('external_id').primaryKey(),
+	dismissedAt: text('dismissed_at').notNull(),
+	// Why this session is tombstoned. Not load-bearing for the import decision —
+	// presence in this table is enough — but it's the only way to answer "why does
+	// this session never appear?" without guessing.
+	reason: text('reason', { enum: ['user_deleted', 'invalid'] }).notNull()
 });

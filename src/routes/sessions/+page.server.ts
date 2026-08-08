@@ -1,7 +1,13 @@
 import { fail } from '@sveltejs/kit';
 import type { Actions, PageServerLoad } from './$types';
 import { db } from '$lib/server/db';
-import { billingPeriods, chargingSessions, ratePlans, settings } from '$lib/server/db/schema';
+import {
+	billingPeriods,
+	chargingSessions,
+	evnexDismissedSessions,
+	ratePlans,
+	settings
+} from '$lib/server/db/schema';
 import { eq } from 'drizzle-orm';
 import {
 	findBillingPeriodId,
@@ -223,6 +229,22 @@ export const actions: Actions = {
 		}
 
 		await db.delete(chargingSessions).where(eq(chargingSessions.id, id));
+
+		// Tombstone the Evnex session so a later poll doesn't re-import it — it's
+		// still inside the lookback window and the charger has no idea it was
+		// deleted here. Ignore-on-conflict since a poll can tombstone the same
+		// session first (reason 'invalid') before the user ever deletes it.
+		if (session.externalId != null) {
+			await db
+				.insert(evnexDismissedSessions)
+				.values({
+					externalId: session.externalId,
+					dismissedAt: new Date().toISOString(),
+					reason: 'user_deleted'
+				})
+				.onConflictDoNothing();
+		}
+
 		return { deleted: true };
 	}
 };
