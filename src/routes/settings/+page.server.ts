@@ -61,13 +61,18 @@ export const load: PageServerLoad = async () => {
 		} catch (err) {
 			// Never let a flaky Evnex API error the whole /settings page — fall back to
 			// showing just the already-selected charger (if any) and a note. The
-			// Reconnect state (auth_failed) is handled separately, above.
+			// Reconnect state (auth_failed) is handled separately, above. Surface the
+			// real error (status + correlation id, never a raw token) rather than a
+			// generic string, and log it server-side too — this endpoint contract is
+			// unverified against a live account (see evnex-client.ts's module doc
+			// comment), so a specific message here is the only way to diagnose it.
+			console.error('[evnex] /settings charge-point list failed:', err);
 			chargePointsError =
-				err instanceof EvnexApiError ||
-				err instanceof EvnexClientNetworkError ||
-				err instanceof EvnexAuthNetworkError
-					? 'Could not reach Evnex to list charge points. Showing your saved selection only.'
-					: 'Something went wrong listing charge points.';
+				err instanceof EvnexApiError
+					? `Could not list charge points: ${err.message}${err.correlationId ? ` (ref: ${err.correlationId})` : ''}`
+					: err instanceof EvnexClientNetworkError || err instanceof EvnexAuthNetworkError
+						? `Could not reach Evnex to list charge points: ${err.message}`
+						: `Something went wrong listing charge points: ${err instanceof Error ? err.message : String(err)}`;
 			if (integration.chargePointId && integration.chargePointName) {
 				chargePoints = [
 					{
@@ -199,14 +204,17 @@ export const actions: Actions = {
 			const orgId = await fetchOrgId(tokenSet.accessToken);
 			await db.update(evnexIntegration).set({ orgId }).where(eqId(integrationRow.id));
 			chargePoints = await fetchChargePoints(tokenSet.accessToken, orgId);
-		} catch {
+		} catch (err) {
 			// Sign-in itself succeeded and is already persisted above; the charge-point
 			// list can be retried on the next page load (`load` does the same fetch).
+			// Surface the real error rather than a generic string — see the matching
+			// comment in `load`'s catch block for why.
+			console.error('[evnex] connectEvnex charge-point list failed:', err);
+			const detail = err instanceof Error ? err.message : String(err);
 			return {
 				connected: true,
 				chargePoints: [],
-				connectWarning:
-					'Signed in, but could not list charge points yet — reload the page to retry.'
+				connectWarning: `Signed in, but could not list charge points yet: ${detail}`
 			};
 		}
 
