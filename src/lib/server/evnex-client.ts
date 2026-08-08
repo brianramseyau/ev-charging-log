@@ -4,15 +4,13 @@
 // shapes evnex.ts and the route expect. Token acquisition/refresh lives in
 // evnex-auth.ts (Cognito) — this file only ever uses an already-issued access token.
 //
-// UNVERIFIED AGAINST A LIVE ACCOUNT. This API is unofficial and has no published spec
-// (plan §4.0) — the shapes below are taken from the plan, which states they were
-// derived from hardbyte/python-evnex and cross-checked against the Enterprise OpenAPI
-// definitions where the two overlap. Every parse below is defensive (skip a malformed
-// item rather than crash the whole poll, per plan §4.0/§6.5) precisely because this
-// hasn't been confirmed against a real response yet. Before trusting this integration
-// against a real account: sign in once, capture one real charge-points response and
-// one real sessions response, and confirm the field names below actually match —
-// plan §10 phase 4 calls this out as the first thing to do, before anything else.
+// This API is unofficial and has no published spec (plan §4.0). fetchOrgId and the
+// charge-points list envelope in fetchChargePoints are now CONFIRMED against a live
+// account (2026-08): the list is flat objects under `data.items`, not the plan's
+// original JSON:API `data[].attributes` guess. fetchSessions and the charge-point
+// detail nesting in fetchChargePointDetailTimeZone remain UNVERIFIED. Every parse
+// below stays defensive (skip a malformed item rather than crash the whole poll, per
+// plan §4.0/§6.5) since the API can change without notice regardless.
 import type { EvnexSessionPayload, EvnexSessionStatus } from './evnex';
 
 const API_BASE = 'https://client-api.evnex.io';
@@ -116,19 +114,24 @@ export async function fetchOrgId(accessToken: string): Promise<string> {
 export interface EvnexChargePointInfo {
 	id: string;
 	name: string;
-	/** IANA timezone, e.g. "Pacific/Auckland" (plan §6.3). Empty string if the list
-	 *  response didn't carry one — see the module doc comment; this is one of the
-	 *  unverified shapes. The caller must not proceed with an empty timezone. */
+	/** IANA timezone, e.g. "Pacific/Auckland" (plan §6.3). Empty string if the detail
+	 *  fetch for this charger failed or didn't carry one. The caller must not proceed
+	 *  with an empty timezone. */
 	timeZone: string;
 }
 
-/** GET /v2/apps/organisations/{orgId}/charge-points */
+/**
+ * GET /v2/apps/organisations/{orgId}/charge-points — confirmed live shape (2026-08):
+ * `{ data: { items: [ { id, name, location, connectors, details, … } ] } }`, flat
+ * fields, NOT the plan's original JSON:API `{ data: [ { attributes: {…} } ] }` guess.
+ * No `timeZone` field anywhere on the list item — see fetchChargePointDetail.
+ */
 export async function fetchChargePoints(
 	accessToken: string,
 	orgId: string
 ): Promise<EvnexChargePointInfo[]> {
 	const body = await evnexFetch(`/v2/apps/organisations/${orgId}/charge-points`, accessToken);
-	const items = (body as { data?: unknown })?.data;
+	const items = (body as { data?: { items?: unknown } })?.data?.items;
 	if (!Array.isArray(items)) {
 		// See the matching comment in fetchOrgId — same reasoning, same log-don't-render
 		// approach so the real shape can be read from container logs.
@@ -136,19 +139,56 @@ export async function fetchChargePoints(
 		throw new EvnexApiError('Evnex charge-points response was not a list.', 502);
 	}
 
-	const points: EvnexChargePointInfo[] = [];
+	const ids: { id: string; name: string }[] = [];
 	for (const item of items) {
-		const record = item as { id?: unknown; attributes?: { name?: unknown; timeZone?: unknown } };
-		if (typeof record?.id !== 'string' || typeof record.attributes?.name !== 'string') {
+		const record = item as { id?: unknown; name?: unknown };
+		if (typeof record?.id !== 'string' || typeof record.name !== 'string') {
 			continue; // malformed entry — skip rather than crash the whole poll (plan §4.0)
 		}
-		points.push({
-			id: record.id,
-			name: record.attributes.name,
-			timeZone: typeof record.attributes.timeZone === 'string' ? record.attributes.timeZone : ''
-		});
+		ids.push({ id: record.id, name: record.name });
 	}
-	return points;
+
+	// The list endpoint carries no timeZone (confirmed live, see the doc comment above),
+	// matching the plan's fallback at §4.5: fetch each charger's detail instead. A home
+	// setup has one charger, so this is at most a couple of extra round trips.
+	return Promise.all(
+		ids.map(async ({ id, name }) => ({
+			id,
+			name,
+			timeZone: await fetchChargePointDetailTimeZone(accessToken, id)
+		}))
+	);
+}
+
+/**
+ * GET /charge-points/{chargePointId} — note NO `/v2/apps` prefix (same asymmetry as
+ * fetchSessions, per plan §4.4). Confirmed via python-evnex's EvnexChargePointDetail
+ * model: the timezone lives at `data.loadSchedule.timezone`, not on the list item or
+ * anywhere flatter — unlike everything else in this file, this nesting is NOT yet
+ * confirmed against a live response. Never throws: a charger with an unreachable or
+ * malformed detail response just gets an empty timezone, which `saveEvnex` already
+ * refuses to persist.
+ */
+async function fetchChargePointDetailTimeZone(
+	accessToken: string,
+	chargePointId: string
+): Promise<string> {
+	try {
+		const body = await evnexFetch(`/charge-points/${chargePointId}`, accessToken);
+		const timeZone = (body as { data?: { loadSchedule?: { timezone?: unknown } } })?.data
+			?.loadSchedule?.timezone;
+		if (typeof timeZone !== 'string' || !timeZone) {
+			console.error(
+				`[evnex] charge-point ${chargePointId} detail response has no loadSchedule.timezone:`,
+				JSON.stringify(body)
+			);
+			return '';
+		}
+		return timeZone;
+	} catch (err) {
+		console.error(`[evnex] charge-point ${chargePointId} detail fetch failed:`, err);
+		return '';
+	}
 }
 
 const KNOWN_STATUSES: readonly EvnexSessionStatus[] = [
