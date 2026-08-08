@@ -209,7 +209,14 @@
 					saving = true;
 					return async ({ update }) => {
 						saving = false;
-						await update();
+						// reset: false — the default `update()` calls the native
+						// HTMLFormElement.reset(), which stomps the number Textfield's DOM
+						// value out from under its `bind:value`. Since the round-tripped
+						// value is textually unchanged, Svelte's reactivity sees no change
+						// and never re-syncs the DOM, leaving the field blank and the next
+						// save failing validation. State is already restored from `data` by
+						// the $effect above, so the native reset is redundant here anyway.
+						await update({ reset: false });
 					};
 				}}
 			>
