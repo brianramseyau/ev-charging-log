@@ -950,7 +950,7 @@ rather than hardcoding:
 ```css
 --charge-home-color: #3987e5;
 --charge-public-color: #d95926;
---charge-imported-color: #15803d; /* Evnex green — see the contrast note */
+--charge-imported-color: #228833; /* Evnex brand green */
 ```
 
 The badge then reuses the existing `color-mix` treatment verbatim:
@@ -968,30 +968,30 @@ The badge then reuses the existing `color-mix` treatment verbatim:
 }
 ```
 
-> **Do not substitute a bright or lime green.** Light mode puts the colour
-> itself on a 15%-on-white tint of the same colour, which bright greens fail
-> badly. Measured against that exact treatment, with the shipped home blue as
-> the baseline:
->
-> | Colour              | Light      | Dark    |
-> | ------------------- | ---------- | ------- |
-> | `#3987e5` home blue | 3.07:1     | 16.10:1 |
-> | `#d95926` public    | 3.22:1     | 16.42:1 |
-> | `#15803d` deep      | **4.09:1** | 17.21:1 |
-> | `#4caf50` grass     | 2.42:1     | 15.06:1 |
-> | `#7ac943` lime      | **1.84:1** | 13.77:1 |
-> | `#4ade80` mint      | **1.59:1** | 13.10:1 |
->
-> A lime chip would be roughly half as legible as everything already shipping.
-> Dark mode is unaffected — white on a 25%-on-black tint clears 13:1 for any of
-> them — so this is a light-mode constraint only.
+`#228833` is Evnex's brand green and is used **as-is in both themes** — no
+darkened light-mode variant, no per-theme override beyond the existing
+`color-mix` percentages.
 
-I could not confirm Evnex's exact brand hex (their documentation host is
-blocked by this environment's egress policy, §4 note). `#15803d` is a
-placeholder chosen to satisfy the constraint above. If the real brand green is
-a brighter lime, keep it for the **dark-mode** tint and as an accent, and use a
-darkened variant for the light-mode foreground — do not use one bright value
-for both.
+That works because it is a deep green rather than a lime. Light mode puts the
+colour on a 15%-on-white tint of itself, which is a harsh test that bright
+greens fail. Measured against that exact treatment, with the shipped home blue
+as the baseline:
+
+| Colour                  | Light      | Dark    |
+| ----------------------- | ---------- | ------- |
+| `#3987e5` home blue     | 3.07:1     | 16.10:1 |
+| `#d95926` public orange | 3.22:1     | 16.42:1 |
+| **`#228833` Evnex**     | **3.73:1** | 16.86:1 |
+| `#4caf50` grass         | 2.42:1     | 15.06:1 |
+| `#7ac943` lime          | 1.84:1     | 13.77:1 |
+
+The brand green is the most legible of the three chips in light mode. Dark mode
+is not a constraint — white on a 25%-on-black tint clears 13:1 for any of them.
+
+> Recorded because it constrains future edits: **do not lighten this token**.
+> A lime substitution would land near 1.84:1, roughly half the legibility of
+> everything currently shipping, and the failure is subtle enough to survive
+> review — the chip stays readable on a good monitor in a bright room.
 
 Two smaller notes:
 
@@ -1151,7 +1151,6 @@ do not conflict and may land in either order. If offline mode lands first:
 | 2   | A `source` column (`manual` / `evnex` / `import`) instead of deriving provenance from `externalId != null`?                                                                                                                                                  | Derive from `externalId`. Add the column if a second integration ever appears.                                                                                                                                                                                         |
 | 3   | Multiple charge points on one account?                                                                                                                                                                                                                       | One charge point, chosen at setup. The schema change to support several is a table, not a column, so this is deliberately deferred rather than designed around.                                                                                                        |
 | 4   | Should a genuine 0 kWh session (plugged in, no energy drawn) be imported at all? **Distinct from an `Invalid` session**, which is now tombstoned on sight (§6.5 rule 1) — this row is only about a `Completed` session whose meter delta happens to be zero. | Import it as a normal session. It is real, it costs $0, and suppressing it would mean the poll silently disagrees with the charger's own history. If these turn out to be noise too, the tombstone mechanism from §6.5 applies unchanged — only the predicate differs. |
-| 5   | Evnex's exact brand green (§7.4). `#15803d` is a placeholder — the documentation host was blocked by egress policy, so the real hex could not be read.                                                                                                       | Ship `#15803d`. If the brand value is a bright lime it cannot be used as the light-mode foreground (1.84:1 vs a 3.07:1 baseline); keep it for the dark tint and darken it for light.                                                                                   |
 
 **Resolved:** which API, and therefore how credentials work. Earlier drafts
 targeted the Enterprise API and went through a client-secret-in-SQLite phase,
@@ -1168,6 +1167,10 @@ worth making.
 built — only guarded against (§4.2, §7.1). Enabling TOTP on the Evnex account
 later would break sign-in until that flow is added, which is the one thing
 worth remembering about this decision.
+
+**Resolved:** the chip colour. Evnex brand green `#228833`, used as-is in both
+themes; it measures 3.73:1 in the light-mode treatment, ahead of both existing
+chips (§7.4).
 
 **New risk, in exchange:** the API is unofficial and can change without notice
 (§4.0). That is a permanent operating condition of this feature, not a
