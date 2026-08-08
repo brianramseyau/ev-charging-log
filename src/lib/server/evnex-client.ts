@@ -104,6 +104,10 @@ export async function fetchOrgId(accessToken: string): Promise<string> {
 	const organisations = (body as { data?: { organisations?: unknown } })?.data?.organisations;
 	const first = Array.isArray(organisations) ? organisations[0] : undefined;
 	if (!first || typeof (first as { id?: unknown }).id !== 'string') {
+		// Shape mismatch against a live account — this endpoint contract is unverified
+		// (see the module doc comment). Log the actual body server-side (never rendered
+		// to the browser) so the real shape can be diagnosed from container logs.
+		console.error('[evnex] unexpected /v2/apps/user response shape:', JSON.stringify(body));
 		throw new EvnexApiError('Evnex user response has no organisations.', 502);
 	}
 	return (first as { id: string }).id;
@@ -126,6 +130,9 @@ export async function fetchChargePoints(
 	const body = await evnexFetch(`/v2/apps/organisations/${orgId}/charge-points`, accessToken);
 	const items = (body as { data?: unknown })?.data;
 	if (!Array.isArray(items)) {
+		// See the matching comment in fetchOrgId — same reasoning, same log-don't-render
+		// approach so the real shape can be read from container logs.
+		console.error('[evnex] unexpected charge-points response shape:', JSON.stringify(body));
 		throw new EvnexApiError('Evnex charge-points response was not a list.', 502);
 	}
 
@@ -187,6 +194,9 @@ export async function fetchSessions(
 	const body = await evnexFetch(`/charge-points/${chargePointId}/sessions`, accessToken);
 	const items = (body as { data?: unknown })?.data;
 	if (!Array.isArray(items)) {
+		// See the matching comment in fetchOrgId — same reasoning, same log-don't-render
+		// approach so the real shape can be read from container logs.
+		console.error('[evnex] unexpected sessions response shape:', JSON.stringify(body));
 		throw new EvnexApiError('Evnex sessions response was not a list.', 502);
 	}
 
