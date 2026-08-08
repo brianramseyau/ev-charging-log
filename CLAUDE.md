@@ -22,6 +22,8 @@ npx vitest run -t "test name"          # run tests matching a name
 
 npm run db:generate         # generate a drizzle migration after editing schema.ts
 npm run db:studio            # drizzle-kit studio (inspect local db)
+npm run db:seed              # wipe + reseed dev DB with ~6 months of demo data (prompts for confirmation; --yes to skip)
+npm run db:reset-evnex       # clear Evnex tombstones + previously-imported sessions so the next poll re-imports fresh (keeps the sign-in connected)
 ```
 
 Migrations apply automatically on server boot (`src/hooks.server.ts` imports `$lib/server/db`, which runs `migrate()`), for both local dev and the Docker image. `db:push`/`db:migrate` exist but aren't part of the normal dev loop.
