@@ -950,10 +950,11 @@ rather than hardcoding:
 ```css
 --charge-home-color: #3987e5;
 --charge-public-color: #d95926;
---charge-imported-color: #228833; /* Evnex brand green */
+--charge-imported-color: #1b3b2b; /* Evnex brand green */
 ```
 
-The badge then reuses the existing `color-mix` treatment verbatim:
+The badge reuses the existing `color-mix` treatment, plus **one token override
+in the dark block** — see below for why it is needed:
 
 ```css
 .badge--imported {
@@ -966,32 +967,61 @@ The badge then reuses the existing `color-mix` treatment verbatim:
 	background: color-mix(in srgb, var(--charge-imported-color) 25%, black);
 	color: #fff;
 }
+:root {
+	/* dark-mode only: a lighter tint of the same hue — see "Dark mode" below */
+	--charge-imported-color: #3c8b5f;
+}
 ```
 
-`#228833` is Evnex's brand green and is used **as-is in both themes** — no
-darkened light-mode variant, no per-theme override beyond the existing
-`color-mix` percentages.
+#### Light mode: the brand green is the strongest of the three
 
-That works because it is a deep green rather than a lime. Light mode puts the
-colour on a 15%-on-white tint of itself, which is a harsh test that bright
-greens fail. Measured against that exact treatment, with the shipped home blue
-as the baseline:
+Light mode puts the colour on a 15%-on-white tint of itself. `#1b3b2b` is a
+deep, desaturated green, so it performs very well:
 
-| Colour                  | Light      | Dark    |
-| ----------------------- | ---------- | ------- |
-| `#3987e5` home blue     | 3.07:1     | 16.10:1 |
-| `#d95926` public orange | 3.22:1     | 16.42:1 |
-| **`#228833` Evnex**     | **3.73:1** | 16.86:1 |
-| `#4caf50` grass         | 2.42:1     | 15.06:1 |
-| `#7ac943` lime          | 1.84:1     | 13.77:1 |
+| Colour                  | Text on its own light tint |
+| ----------------------- | -------------------------- |
+| `#3987e5` home blue     | 3.07:1                     |
+| `#d95926` public orange | 3.22:1                     |
+| **`#1b3b2b` Evnex**     | **9.38:1**                 |
 
-The brand green is the most legible of the three chips in light mode. Dark mode
-is not a constraint — white on a 25%-on-black tint clears 13:1 for any of them.
+Roughly three times the contrast of the chips already shipping. Nothing to
+adjust.
 
-> Recorded because it constrains future edits: **do not lighten this token**.
-> A lime substitution would land near 1.84:1, roughly half the legibility of
-> everything currently shipping, and the failure is subtle enough to survive
-> review — the chip stays readable on a good monitor in a bright room.
+#### Dark mode: the same colour disappears
+
+In dark mode every chip renders **white text on a 25%-on-black tint**, so the
+tint is the _only_ thing distinguishing home from public from imported. That is
+where `#1b3b2b` fails — not on text contrast (19.4:1, the highest of any chip)
+but on the tint itself:
+
+| Colour              | Chip background | Luminance  | vs `#111827` surface |
+| ------------------- | --------------- | ---------- | -------------------- |
+| surface             | `#111827`       | 0.0092     | —                    |
+| `#3987e5` home      | `#0e2239`       | 0.0153     | lighter ✓            |
+| `#d95926` public    | `#36160a`       | 0.0138     | lighter ✓            |
+| `#1b3b2b` brand     | `#070f0b`       | **0.0041** | **darker ✗**         |
+| **`#3c8b5f`** (fix) | `#0f2318`       | 0.0137     | lighter ✓            |
+
+At 25% on black the brand green lands at `#070f0b` — near-black, and **darker
+than the `#111827` page background** (`+layout.svelte:155`). The chip reads as
+a hole punched in the row rather than a coloured pill, and carries almost no
+hue, so the one thing it exists to do — mark imported rows apart at a glance —
+stops working in the theme this app is built around first.
+
+`#3c8b5f` fixes it: same hue (147° against the brand's 150°, so a genuine
+lighter tint rather than a different colour), and a luminance of 0.0137 that
+sits between the public orange and home blue chips — matching their visual
+weight instead of guessing at one.
+
+> The per-theme override is an asymmetry — home and public use one token across
+> both themes — so it is worth stating plainly: it exists because `#1b3b2b` is
+> dark enough to fall below the dark surface, which is not true of the other
+> two. **Do not "tidy" it away by using the brand hex in both blocks.**
+>
+> The opposite mistake also matters: **do not lighten the light-mode value.**
+> A lime green such as `#7ac943` measures 1.84:1 there, roughly half of
+> everything currently shipping, and stays readable enough on a good monitor to
+> survive review.
 
 Two smaller notes:
 
@@ -1090,8 +1120,11 @@ light and dark**:
 - A draft row showing both **Add kWh** and **Add odometer**.
 - The §7.4 chip: a manual row and an imported row **in the same screenshot**,
   so the colours are compared side by side rather than across two images. The
-  whole point of the chip is telling them apart at a glance, and light mode is
-  where the green is at risk.
+  whole point of the chip is telling them apart at a glance.
+  **Dark mode is the one that matters here** — the per-theme token override
+  (§7.4) is exactly the kind of thing a refactor drops, and the symptom is a
+  chip that fades into the row rather than an obvious break. Compare it against
+  the home and public chips in the same image.
 - A history list containing a null-odometer row, confirming it renders rather
   than throwing (§8) — this is the failure that blanks the entire list.
 
@@ -1168,9 +1201,11 @@ built — only guarded against (§4.2, §7.1). Enabling TOTP on the Evnex accoun
 later would break sign-in until that flow is added, which is the one thing
 worth remembering about this decision.
 
-**Resolved:** the chip colour. Evnex brand green `#228833`, used as-is in both
-themes; it measures 3.73:1 in the light-mode treatment, ahead of both existing
-chips (§7.4).
+**Resolved:** the chip colour. Evnex brand green `#1b3b2b` in light mode
+(9.38:1, three times the contrast of the existing chips), with a lighter tint
+of the same hue, `#3c8b5f`, overridden for dark mode — where the brand value
+renders darker than the page background and stops reading as a chip at all
+(§7.4).
 
 **New risk, in exchange:** the API is unofficial and can change without notice
 (§4.0). That is a permanent operating condition of this feature, not a
