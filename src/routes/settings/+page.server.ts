@@ -6,9 +6,7 @@ import { evnexIntegration, settings } from '$lib/server/db/schema';
 import {
 	EvnexMfaRequiredError,
 	EvnexNetworkError as EvnexAuthNetworkError,
-	EvnexRefreshExpiredError,
 	EvnexSignInError,
-	refresh as evnexRefresh,
 	signIn as evnexSignIn
 } from '$lib/server/evnex-auth';
 import {
@@ -18,54 +16,13 @@ import {
 	fetchOrgId,
 	type EvnexChargePointInfo
 } from '$lib/server/evnex-client';
-import { isTokenExpired } from '$lib/server/evnex';
+import { ensureAccessToken } from '$lib/server/evnex-token';
 
 type EvnexIntegrationRow = typeof evnexIntegration.$inferSelect;
 
 async function getIntegration(): Promise<EvnexIntegrationRow | undefined> {
 	const [row] = await db.select().from(evnexIntegration).limit(1);
 	return row;
-}
-
-/**
- * Ensures a usable access token for `row`, refreshing it first if it's expired (or
- * about to be — `isTokenExpired`'s clock-skew margin, plan §6.6 step 2). Persists a
- * refreshed token set. If the refresh token itself has expired/been revoked, records
- * `lastPollStatus = 'auth_failed'` on the row so the UI shows the Reconnect prompt
- * (plan §7.1) and rethrows so the caller can stop.
- */
-async function ensureAccessToken(row: EvnexIntegrationRow): Promise<string> {
-	if (row.refreshToken == null) {
-		throw new EvnexRefreshExpiredError();
-	}
-	if (!isTokenExpired(row.accessTokenExpiresAt, new Date())) {
-		return row.accessToken as string;
-	}
-
-	try {
-		const tokenSet = await evnexRefresh(row.email ?? '', row.refreshToken);
-		await db
-			.update(evnexIntegration)
-			.set({
-				accessToken: tokenSet.accessToken,
-				refreshToken: tokenSet.refreshToken,
-				accessTokenExpiresAt: tokenSet.accessTokenExpiresAt
-			})
-			.where(eqId(row.id));
-		return tokenSet.accessToken;
-	} catch (err) {
-		if (err instanceof EvnexRefreshExpiredError) {
-			await db
-				.update(evnexIntegration)
-				.set({
-					lastPollStatus: 'auth_failed',
-					lastPollError: err.message,
-					lastPolledAt: new Date().toISOString()
-				})
-				.where(eqId(row.id));
-		}
-		throw err;
-	}
 }
 
 function eqId(id: number) {
