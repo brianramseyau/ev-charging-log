@@ -66,6 +66,7 @@
 	:global(html) {
 		--charge-home-color: #3987e5;
 		--charge-public-color: #d95926;
+		--charge-imported-color: #1b3b2b; /* Evnex brand green */
 		color-scheme: light dark;
 	}
 
@@ -151,6 +152,14 @@
 	}
 
 	@media (prefers-color-scheme: dark) {
+		/* Dark-mode-only tint of the same hue: at 25%-on-black (the badge treatment
+		   every chip on /sessions uses), the light-mode brand green (#1b3b2b) renders
+		   darker than this page's #111827 surface below and stops reading as a chip
+		   at all — see foundational/EVNEX-INTEGRATION-PLAN.md §7.4. */
+		:global(html) {
+			--charge-imported-color: #3c8b5f;
+		}
+
 		.bottom-nav {
 			background: #111827;
 			border-top-color: rgba(255, 255, 255, 0.1);

@@ -5,7 +5,7 @@
 	import Card, { Content } from '@smui/card';
 	import IconButton from '@smui/icon-button';
 	import Textfield from '@smui/textfield';
-	import { mdiDeleteOutline, mdiHome, mdiEvStation } from '@mdi/js';
+	import { mdiCloudDownloadOutline, mdiDeleteOutline, mdiHome, mdiEvStation } from '@mdi/js';
 	import AddressField from '$lib/components/AddressField.svelte';
 	import DateTimeField from '$lib/components/DateTimeField.svelte';
 	import Icon from '$lib/components/Icon.svelte';
@@ -52,6 +52,18 @@
 
 	let submitting = $state(false);
 	let completingId = $state<number | null>(null);
+	let polling = $state(false);
+
+	const pollSummary = $derived(form?.pollSummary ?? null);
+	const pollError = $derived(form?.pollError ?? null);
+
+	function formatPollSummary(summary: NonNullable<typeof pollSummary>) {
+		const parts: string[] = [];
+		parts.push(`Imported ${summary.inserted} draft${summary.inserted === 1 ? '' : 's'}`);
+		parts.push(`updated ${summary.updated}`);
+		if (summary.skipped > 0) parts.push(`skipped ${summary.skipped} already imported`);
+		return `${parts.join(', ')}.`;
+	}
 
 	const PAGE_SIZE = 5;
 	let visibleCount = $state(PAGE_SIZE);
@@ -198,7 +210,7 @@
 					label="kWh used (optional)"
 					bind:value={kwhUsed}
 					input$name="kwhUsed"
-					input$step="0.01"
+					input$step="0.001"
 					input$min="0"
 					style="width: 100%"
 					invalid={!!errors.kwhUsed}
@@ -262,19 +274,81 @@
 	</Content>
 </Card>
 
-<h2 class="section-title">History</h2>
+<div class="history-header">
+	<h2 class="section-title">History</h2>
+	<form
+		method="POST"
+		action="?/pollEvnex"
+		use:enhance={() => {
+			polling = true;
+			return async ({ update }) => {
+				polling = false;
+				await update();
+			};
+		}}
+	>
+		<Button
+			variant="outlined"
+			type="submit"
+			disabled={!data.evnexReady || polling}
+			title={data.evnexReady ? undefined : 'Configure the Evnex integration in Settings first'}
+		>
+			<Icon path={mdiCloudDownloadOutline} size={18} />
+			<Label>{polling ? 'Pulling…' : 'Pull from charger'}</Label>
+		</Button>
+	</form>
+</div>
+{#if !data.evnexReady}
+	<p class="field-hint">
+		<a href="/settings">Set up the Evnex integration</a> to pull sessions automatically.
+	</p>
+{/if}
+{#if pollSummary}
+	<p class="save-feedback__ok">{formatPollSummary(pollSummary)}</p>
+	{#if pollSummary.tombstoned > 0}
+		<p class="save-feedback__note">
+			{pollSummary.tombstoned} invalid or zero-energy session{pollSummary.tombstoned === 1
+				? ''
+				: 's'} dismissed.
+		</p>
+	{/if}
+	{#if pollSummary.invalidAfterImport.length > 0}
+		<p class="save-feedback__warning">
+			{pollSummary.invalidAfterImport.length} previously imported session{pollSummary
+				.invalidAfterImport.length === 1
+				? ''
+				: 's'} marked invalid or zero-energy by the charger — review: {pollSummary.invalidAfterImport.join(
+				', '
+			)}.
+		</p>
+	{/if}
+{/if}
+{#if pollError}
+	<p class="field-error">{pollError}</p>
+{/if}
 
 {#if data.sessions.length === 0}
 	<p class="empty-state">No sessions logged yet.</p>
 {:else}
 	<ul class="session-list">
 		{#each visibleSessions as session (session.id)}
-			<li class="session-row" class:session-row--draft={session.kwhUsed == null}>
+			<li
+				class="session-row"
+				class:session-row--draft={session.kwhUsed == null || session.odometerKm == null}
+			>
 				<div class="session-row__top">
-					<span class="badge" class:badge--home={session.kind === 'home'}>
-						{session.kind === 'home' ? 'Home' : 'Public'}
+					<span
+						class="badge"
+						class:badge--home={session.kind === 'home' && session.externalId == null}
+						class:badge--imported={session.externalId != null}
+					>
+						{session.externalId != null
+							? 'Home - Imported'
+							: session.kind === 'home'
+								? 'Home'
+								: 'Public'}
 					</span>
-					{#if session.kwhUsed == null}
+					{#if session.kwhUsed == null || session.odometerKm == null}
 						<span class="badge badge--draft">Draft</span>
 					{/if}
 					<span class="session-row__datetime">{session.date} · {session.time}</span>
@@ -288,7 +362,9 @@
 					{/if}
 				</div>
 				<div class="session-row__details">
-					<span>{session.odometerKm.toLocaleString()} km</span>
+					{#if session.odometerKm != null}
+						<span>{session.odometerKm.toLocaleString()} km</span>
+					{/if}
 					{#if session.kwhUsed != null}
 						<span>{session.kwhUsed} kWh</span>
 					{/if}
@@ -312,7 +388,7 @@
 				{#if session.notes}
 					<p class="session-row__notes">{session.notes}</p>
 				{/if}
-				{#if session.kwhUsed == null && !session.periodSubmitted}
+				{#if (session.kwhUsed == null || session.odometerKm == null) && !session.periodSubmitted}
 					<form
 						method="POST"
 						action="?/complete"
@@ -326,23 +402,43 @@
 						}}
 					>
 						<input type="hidden" name="id" value={session.id} />
-						<label class="complete-form__field">
-							<span class="complete-form__label">kWh used</span>
-							<input
-								type="number"
-								name="kwhUsed"
-								step="0.01"
-								min="0"
-								required
-								class:invalid={completeErrorId === session.id && !!completeError}
-							/>
-						</label>
+						{#if session.kwhUsed == null}
+							<label class="complete-form__field">
+								<span class="complete-form__label">kWh used</span>
+								<input
+									type="number"
+									name="kwhUsed"
+									step="0.001"
+									min="0"
+									required
+									class:invalid={completeErrorId === session.id && !!completeError}
+								/>
+							</label>
+						{/if}
+						{#if session.odometerKm == null}
+							<label class="complete-form__field">
+								<span class="complete-form__label">Add odometer (km)</span>
+								<input
+									type="number"
+									name="odometerKm"
+									step="0.1"
+									min="0"
+									required
+									class:invalid={completeErrorId === session.id && !!completeError}
+								/>
+							</label>
+						{/if}
 						<Button variant="outlined" type="submit" disabled={completingId === session.id}>
 							<Label>{completingId === session.id ? 'Saving…' : 'Complete'}</Label>
 						</Button>
 					</form>
 					{#if completeErrorId === session.id && completeError}
 						<p class="field-error">{completeError}</p>
+					{/if}
+					{#if form?.completed && form.completedId === session.id && form.odometerWarning}
+						<p class="save-feedback__warning">
+							Warning: this odometer reading is lower than the last recorded reading.
+						</p>
 					{/if}
 				{/if}
 			</li>
@@ -364,6 +460,22 @@
 		font-size: 1rem;
 		font-weight: 600;
 		margin: 1.5rem 0 0.75rem;
+	}
+
+	.history-header {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 0.75rem;
+		flex-wrap: wrap;
+	}
+
+	.history-header .section-title {
+		margin: 1.5rem 0 0;
+	}
+
+	.history-header form {
+		margin: 1.5rem 0 0;
 	}
 
 	:global(.session-form-card) {
@@ -546,6 +658,11 @@
 		color: #92400e;
 	}
 
+	.badge--imported {
+		background: color-mix(in srgb, var(--charge-imported-color) 15%, white);
+		color: var(--charge-imported-color);
+	}
+
 	.session-row__details {
 		display: flex;
 		flex-wrap: wrap;
@@ -605,6 +722,11 @@
 		.badge--draft {
 			background: #78350f;
 			color: #fde68a;
+		}
+
+		.badge--imported {
+			background: color-mix(in srgb, var(--charge-imported-color) 25%, black);
+			color: #fff;
 		}
 
 		.empty-state {

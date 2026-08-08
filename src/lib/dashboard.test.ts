@@ -71,6 +71,19 @@ describe('computeEfficiencySeries', () => {
 		];
 		expect(computeEfficiencySeries(sessions)).toEqual([]);
 	});
+
+	it('skips a session with a null odometer, or whose predecessor has a null odometer, instead of crashing or producing NaN', () => {
+		const sessions = [
+			session({ id: 1, date: '2026-01-01', odometerKm: 100, kwhUsed: 10 }),
+			session({ id: 2, date: '2026-01-05', odometerKm: null, kwhUsed: 20 }), // draft, odometer not yet known
+			session({ id: 3, date: '2026-01-10', odometerKm: 550, kwhUsed: 30 })
+		];
+		const points = computeEfficiencySeries(sessions);
+		// session 2 produces no point (its own odometer is null), and session 3
+		// produces no point either since its predecessor's odometer is null —
+		// it is not carried forward from session 1.
+		expect(points).toEqual([]);
+	});
 });
 
 describe('computePeriodSplits', () => {

@@ -9,7 +9,7 @@ export interface SessionDateTime {
 
 export interface SessionRow extends SessionDateTime {
 	id: number;
-	odometerKm: number;
+	odometerKm: number | null; // null for draft sessions where the charger hasn't reported an odometer reading yet
 	kwhUsed: number | null; // null for draft sessions, whose kWh isn't known yet
 }
 
@@ -44,12 +44,17 @@ export function sortByDateTimeDesc<T extends SessionDateTime>(rows: T[]): T[] {
 }
 
 /**
- * Odometer reading of the most recent session across all sessions (any kind),
- * or null if there are no sessions yet.
+ * Odometer reading of the most recent session that actually has one, across
+ * all sessions (any kind), skipping sessions with a null (not-yet-known)
+ * odometer. Null if there are no sessions yet, or none of them have a
+ * recorded odometer.
  */
 export function mostRecentOdometer<T extends SessionRow>(rows: T[]): number | null {
 	const desc = sortByDateTimeDesc(rows);
-	return desc[0]?.odometerKm ?? null;
+	for (const row of desc) {
+		if (row.odometerKm != null) return row.odometerKm;
+	}
+	return null;
 }
 
 /**
@@ -79,8 +84,11 @@ export function findBillingPeriodId(date: string, periods: BillingPeriodRange[])
  * Attaches a km/kWh efficiency figure to each session: the distance travelled
  * since the previous session (by date/time order, any kind) divided by this
  * session's kWh used. Null for the first session, a draft session (no kWh
- * recorded yet), or when kWh used is 0. A draft session's own odometer
- * reading still counts as a valid "previous" reading for the session after it.
+ * recorded yet), when kWh used is 0, or when either this session's or the
+ * immediately-preceding session's odometer reading is null (not yet known —
+ * e.g. an unresolved Evnex draft). A null odometer is never carried forward
+ * from an earlier reading: doing so would attribute two intervals' distance
+ * to one session's kWh and silently understate efficiency.
  *
  * Returns sessions in ascending chronological order.
  */
@@ -91,7 +99,11 @@ export function withEfficiency<T extends SessionRow>(
 	return asc.map((curr, i) => {
 		const prev = asc[i - 1];
 		const efficiencyKmPerKwh =
-			prev && curr.kwhUsed != null && curr.kwhUsed > 0
+			prev &&
+			curr.kwhUsed != null &&
+			curr.kwhUsed > 0 &&
+			curr.odometerKm != null &&
+			prev.odometerKm != null
 				? (curr.odometerKm - prev.odometerKm) / curr.kwhUsed
 				: null;
 		return { ...curr, efficiencyKmPerKwh };

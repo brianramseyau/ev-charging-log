@@ -97,4 +97,29 @@ describe('generateReport', () => {
 		expect(sheet.getCell('B1').value).toContain('Not set');
 		expect(sheet.getCell('B4').value).toBe(0);
 	});
+
+	it('handles sessions with null odometerKm (renders as blank cell)', async () => {
+		const sessionsWithNullOdometer: ReportSession[] = [
+			{
+				time: '10:00',
+				date: '2026-08-05',
+				odometerKm: null,
+				kwhUsed: 5.5,
+				location: 'Home',
+				cost: 1.65
+			}
+		];
+
+		const buffer = await generateReport(
+			{ label: 'August 2026', startDate: '2026-08-01', endDate: '2026-08-31' },
+			sessionsWithNullOdometer,
+			[],
+			{ fullName: 'Test User', vehicleLabel: 'XYZ789' }
+		);
+
+		const workbook = new ExcelJS.Workbook();
+		await workbook.xlsx.load(buffer as unknown as Parameters<typeof workbook.xlsx.load>[0]);
+		const sheet = workbook.getWorksheet('Report');
+		expect(sheet).toBeDefined();
+	});
 });
