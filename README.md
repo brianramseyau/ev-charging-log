@@ -31,6 +31,8 @@ See [PLAN.md](PLAN.md) for the full project plan, data model, and build phases.
 - Per billing-period reports matching the format expected by a lease company,
   exported as a filled-in `.xlsx`.
 - Import historical spreadsheet data.
+- Optional Evnex charger integration: pull recent home-charging sessions in
+  as drafts, so only the odometer needs typing in by hand.
 - Personal dashboard: km/kWh efficiency trend, home vs public charging split,
   cost over time.
 - Installable PWA, mobile-first UI.
@@ -63,6 +65,20 @@ you change `src/lib/server/db/schema.ts`, generate a new migration file with:
 ```sh
 npm run db:generate
 ```
+
+## Evnex integration
+
+Optional, and entirely configured in the app — open `/settings`, sign in with
+an ordinary Evnex account (the same email/password as the Evnex mobile app),
+pick your charge point, and switch it on. No environment variables, no config
+file — the password is used once to sign in and never stored, and the same
+setup flow works identically on every deployment, Electron included.
+
+It talks to Evnex's consumer Cloud API, which has no published specification,
+so worth saying plainly: it's built against a reverse-engineered contract and
+may break if Evnex changes it without notice. See
+[foundational/EVNEX-INTEGRATION-PLAN.md](foundational/EVNEX-INTEGRATION-PLAN.md)
+for the full design.
 
 ## Building
 

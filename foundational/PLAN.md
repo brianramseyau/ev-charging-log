@@ -86,18 +86,39 @@ charging_sessions
   kind                  -- 'home' | 'public'
   date
   time
-  odometer_km
+  odometer_km           -- nullable: only a session imported from Evnex (external_id
+                         -- set) may omit it; manual creation still requires it
   kwh_used
   location
   cost                  -- computed at save time from the active rate_plan (home only;
                          -- public sessions are already claimed elsewhere, cost not needed
                          -- for the report but stored for the dashboard if known)
   notes
+  external_id           -- nullable, unique: Evnex session UUID, for draft dedupe
+
+evnex_integration
+  id (singleton row)
+  email                 -- shown in /settings; the password itself is never stored
+  org_id                -- Evnex org, from GET /v2/apps/user
+  charge_point_id, charge_point_name, charge_point_time_zone
+  import_lookback_days  -- default 3; the client-side bound on what a poll imports
+  enabled
+  access_token, access_token_expires_at, refresh_token   -- Cognito token set
+  last_polled_at, last_poll_status, last_poll_error
+
+evnex_dismissed_sessions
+  external_id (PK)      -- tombstone: never (re-)import this Evnex session
+  dismissed_at
+  reason                -- 'user_deleted' | 'invalid'
 ```
 
 Derived, not stored: totals per period, home %, cost breakdown, km/kWh — all
 computed from `charging_sessions` + `rate_plans` so historical rate changes
 stay correct.
+
+See [EVNEX-INTEGRATION-PLAN.md](EVNEX-INTEGRATION-PLAN.md) for the full design
+behind `evnex_integration`/`evnex_dismissed_sessions` and the nullable
+`odometer_km`/`external_id` columns above.
 
 ## 5. Core features
 
@@ -287,7 +308,7 @@ build with its own ABI (not the system Node's), so:
   needed in the common case, but worth confirming this happens as part of
   `electron:build` the first time it's wired up, same way the Dockerfile
   already documents its own `better-sqlite3` handling (`npm rebuild
-  better-sqlite3` after `--ignore-scripts` install).
+better-sqlite3` after `--ignore-scripts` install).
 - This is a per-OS/per-arch concern (mac x64 + arm64 at minimum) — same
   category of problem the Dockerfile already solves for `arm64 musl`, just
   for a different runtime target.
@@ -346,3 +367,4 @@ already uses for the Docker image):
 [x] Fix: For a mobile-first app, the Periods view page is very unfriendly with excessing x-scroll. Rework this area to be far more mobile friendly, this is already achieved in the Sessions history relatively well (though has less data it needs to show).
 [x] Enhancement: add pagination to the sessions page history, should load no more than 5 at a time (about a screen full on a modern smartphone).
 [x] Enhancement: Add average cost per kWh and average cost per km KPIs to the dashboard, with the cost-per-km figure compared against the AU government mileage reimbursement rate (5.47c/km) — coloured green when actual cost per km is above the rate (net gain from claiming), red when at or below it.
+[x] Enhancement: Evnex charger integration — pull recent home-charging sessions from the user's Evnex charger as drafts (date/time/kWh/location known, odometer still typed in by hand), configured entirely through /settings with no environment variables. See [EVNEX-INTEGRATION-PLAN.md](EVNEX-INTEGRATION-PLAN.md) for the full design. Talks to Evnex's unofficial, undocumented consumer Cloud API — the exact wire shapes in `evnex-client.ts` haven't been verified against a live account yet (no Evnex credentials were available while building this); confirm them against a real charge-points/sessions response before relying on it.
