@@ -4,13 +4,15 @@
 // shapes evnex.ts and the route expect. Token acquisition/refresh lives in
 // evnex-auth.ts (Cognito) — this file only ever uses an already-issued access token.
 //
-// This API is unofficial and has no published spec (plan §4.0). fetchOrgId and the
-// charge-points list envelope in fetchChargePoints are now CONFIRMED against a live
-// account (2026-08): the list is flat objects under `data.items`, not the plan's
-// original JSON:API `data[].attributes` guess. fetchSessions and the charge-point
-// detail nesting in fetchChargePointDetailTimeZone remain UNVERIFIED. Every parse
-// below stays defensive (skip a malformed item rather than crash the whole poll, per
-// plan §4.0/§6.5) since the API can change without notice regardless.
+// This API is unofficial and has no published spec (plan §4.0). fetchOrgId, the
+// charge-points list envelope in fetchChargePoints, and the charge-point detail
+// envelope in fetchChargePointDetailTimeZone are now CONFIRMED against a live account
+// (2026-08) — see each function's doc comment for its exact shape; notably the list
+// endpoint is flat objects under `data.items` while the detail endpoint is JSON:API
+// `data.attributes.{…}`, so the two are NOT parsed the same way. fetchSessions remains
+// UNVERIFIED. Every parse below stays defensive (skip a malformed item rather than
+// crash the whole poll, per plan §4.0/§6.5) since the API can change without notice
+// regardless.
 import type { EvnexSessionPayload, EvnexSessionStatus } from './evnex';
 
 const API_BASE = 'https://client-api.evnex.io';
@@ -162,12 +164,13 @@ export async function fetchChargePoints(
 
 /**
  * GET /charge-points/{chargePointId} — note NO `/v2/apps` prefix (same asymmetry as
- * fetchSessions, per plan §4.4). Confirmed via python-evnex's EvnexChargePointDetail
- * model: the timezone lives at `data.loadSchedule.timezone`, not on the list item or
- * anywhere flatter — unlike everything else in this file, this nesting is NOT yet
- * confirmed against a live response. Never throws: a charger with an unreachable or
- * malformed detail response just gets an empty timezone, which `saveEvnex` already
- * refuses to persist.
+ * fetchSessions, per plan §4.4). Confirmed live (2026-08): unlike the flat list
+ * envelope in fetchChargePoints, this endpoint IS JSON:API-shaped —
+ * `data.attributes.timeZone` (e.g. "Australia/Melbourne"), a sibling of `name`/
+ * `serial`/`model`. python-evnex's `loadSchedule.timezone` field does not appear in
+ * the real response; ignore that model for this purpose. Never throws: a charger with
+ * an unreachable or malformed detail response just gets an empty timezone, which
+ * `saveEvnex` already refuses to persist.
  */
 async function fetchChargePointDetailTimeZone(
 	accessToken: string,
@@ -175,11 +178,11 @@ async function fetchChargePointDetailTimeZone(
 ): Promise<string> {
 	try {
 		const body = await evnexFetch(`/charge-points/${chargePointId}`, accessToken);
-		const timeZone = (body as { data?: { loadSchedule?: { timezone?: unknown } } })?.data
-			?.loadSchedule?.timezone;
+		const timeZone = (body as { data?: { attributes?: { timeZone?: unknown } } })?.data?.attributes
+			?.timeZone;
 		if (typeof timeZone !== 'string' || !timeZone) {
 			console.error(
-				`[evnex] charge-point ${chargePointId} detail response has no loadSchedule.timezone:`,
+				`[evnex] charge-point ${chargePointId} detail response has no attributes.timeZone:`,
 				JSON.stringify(body)
 			);
 			return '';
