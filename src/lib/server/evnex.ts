@@ -146,6 +146,8 @@ export function toDraftSession(
 export type SkipReason =
 	| 'invalid'
 	| 'invalid_after_import'
+	| 'zero_energy'
+	| 'zero_energy_after_import'
 	| 'unmappable'
 	| 'outside_window'
 	| 'dismissed'
@@ -172,26 +174,35 @@ export interface ExistingSessionForImport {
  * 1. `sessionStatus === 'Invalid'` -> tombstone always. `invalid` if there's
  *    no existing row, `invalid_after_import` if there is one (in which case
  *    the existing row is left untouched — never deleted/modified here).
- * 2. Before the lookback window -> `outside_window`. This is the *only*
+ * 2. `energyKwh === 0` -> tombstone always, the same treatment as rule 1. A
+ *    zero-energy session (`meterStop === meterStart`) is a charger blip —
+ *    plugged in and immediately stopped, never actually delivered power —
+ *    not a billable charge worth a draft row. `zero_energy`/
+ *    `zero_energy_after_import` mirror rule 1's two reasons; the existing
+ *    row (if any) is left untouched, same as rule 1. This intentionally
+ *    fires before rule 6 even considers the existing row, so a zero reading
+ *    can never fill in an existing draft's kWh either.
+ * 3. Before the lookback window -> `outside_window`. This is the *only*
  *    client-side enforcement of `importLookbackDays`, since the real Evnex
  *    sessions endpoint takes no date range (plan §4.4).
- * 3. Already tombstoned -> `dismissed`.
- * 4. No existing row -> insert as a draft (kWh possibly still null).
- * 5. Existing row, kWh already set -> `already_complete` (never overwrite a
+ * 4. Already tombstoned -> `dismissed`.
+ * 5. No existing row -> insert as a draft (kWh possibly still null).
+ * 6. Existing row, kWh already set -> `already_complete` (never overwrite a
  *    user-corrected value).
- * 6. Existing row, kWh null, no energy figure yet -> `still_charging`.
- * 7. Existing row, kWh null, energy figure present -> update.
- * 8. The existing row's billing period is already submitted -> overrides the
- *    update from rule 7 with `period_submitted`. (A brand-new insert from
- *    rule 4 has no assigned billing period yet — that assignment happens
+ * 7. Existing row, kWh null, no energy figure yet -> `still_charging`.
+ * 8. Existing row, kWh null, energy figure present -> update.
+ * 9. The existing row's billing period is already submitted -> overrides the
+ *    update from rule 8 with `period_submitted`. (A brand-new insert from
+ *    rule 5 has no assigned billing period yet — that assignment happens
  *    downstream via `findBillingPeriodId`, after this function returns, per
  *    plan §6.6 step 8 — so this rule can only actually fire against an
  *    *existing* row's already-known `billingPeriodId`, which is the case
  *    this function has the data to check.)
  *
- * `energyKwh === 0` and `kwhUsed === 0` are both treated as present values,
- * never as "still charging" — every presence check below is `!= null`, never
- * a bare truthy check.
+ * `kwhUsed === 0` on an *existing* row is still treated as a present value,
+ * never as "still charging" (rule 7's presence check is `!= null`, never a
+ * bare truthy check) — rule 2 only ever stops a *zero remote reading* from
+ * being imported or applied, it never touches an already-stored 0.
  */
 export function planImport(
 	remote: EvnexSessionPayload[],
@@ -235,37 +246,48 @@ export function planImport(
 			continue;
 		}
 
-		// Rule 2: outside the lookback window (the real client-side enforcement).
+		// Rule 2: zero energy — tombstone always, same treatment as rule 1. A
+		// charger blip with no actual power delivered isn't a billable session.
+		if (session.energyKwh === 0) {
+			tombstone.push(session.id);
+			skipped.push({
+				externalId: session.id,
+				reason: existingRow ? 'zero_energy_after_import' : 'zero_energy'
+			});
+			continue;
+		}
+
+		// Rule 3: outside the lookback window (the real client-side enforcement).
 		if (session.startDate < opts.windowStart) {
 			skipped.push({ externalId: session.id, reason: 'outside_window' });
 			continue;
 		}
 
-		// Rule 3: already tombstoned by an earlier poll.
+		// Rule 4: already tombstoned by an earlier poll.
 		if (dismissedIds.has(session.id)) {
 			skipped.push({ externalId: session.id, reason: 'dismissed' });
 			continue;
 		}
 
-		// Rule 4: new draft.
+		// Rule 5: new draft.
 		if (!existingRow) {
 			insert.push(toDraftSession(session, { timeZone: opts.timeZone, location: opts.location }));
 			continue;
 		}
 
-		// Rule 5: never overwrite a kWh value the user may have corrected.
+		// Rule 6: never overwrite a kWh value the user may have corrected.
 		if (existingRow.kwhUsed != null) {
 			skipped.push({ externalId: session.id, reason: 'already_complete' });
 			continue;
 		}
 
-		// Rule 6: no energy figure yet — still charging (0 counts as present).
+		// Rule 7: no energy figure yet — still charging (0 was already handled by rule 2).
 		if (session.energyKwh == null) {
 			skipped.push({ externalId: session.id, reason: 'still_charging' });
 			continue;
 		}
 
-		// Rule 8: the existing row's billing period is already submitted.
+		// Rule 9: the existing row's billing period is already submitted.
 		if (
 			existingRow.billingPeriodId != null &&
 			submittedPeriodIds.has(existingRow.billingPeriodId)
@@ -274,7 +296,7 @@ export function planImport(
 			continue;
 		}
 
-		// Rule 7: fill in kWh.
+		// Rule 8: fill in kWh.
 		update.push({ id: existingRow.id, kwhUsed: session.energyKwh });
 	}
 

@@ -201,7 +201,44 @@ describe('planImport', () => {
 		expect(result.insert).toHaveLength(1);
 	});
 
-	it('rule 2: a session before windowStart -> outside_window', () => {
+	it('rule 2: zero energy with no existing row -> tombstone + skip reason "zero_energy"', () => {
+		const result = planImport([payload({ energyKwh: 0 })], [], [], baseOpts);
+		expect(result.tombstone).toEqual(['evnex-session-1']);
+		expect(result.skipped).toEqual([{ externalId: 'evnex-session-1', reason: 'zero_energy' }]);
+		expect(result.insert).toEqual([]);
+		expect(result.update).toEqual([]);
+	});
+
+	it('rule 2: zero energy with an existing row -> tombstone + "zero_energy_after_import", row untouched', () => {
+		const existing = [existingRow({ id: 42, kwhUsed: null, billingPeriodId: 3 })];
+		const result = planImport([payload({ energyKwh: 0 })], existing, [], baseOpts);
+		expect(result.tombstone).toEqual(['evnex-session-1']);
+		expect(result.skipped).toEqual([
+			{ externalId: 'evnex-session-1', reason: 'zero_energy_after_import' }
+		]);
+		expect(result.insert).toEqual([]);
+		expect(result.update).toEqual([]);
+	});
+
+	it('rule 2: a zero-energy session already in dismissed still plans cleanly (still tombstoned)', () => {
+		const result = planImport([payload({ energyKwh: 0 })], [], ['evnex-session-1'], baseOpts);
+		expect(result.tombstone).toEqual(['evnex-session-1']);
+		expect(result.skipped).toEqual([{ externalId: 'evnex-session-1', reason: 'zero_energy' }]);
+	});
+
+	it('rule 2 takes priority over rule 6 (never fills an existing draft in with a zero reading)', () => {
+		const existing = [existingRow({ id: 7, kwhUsed: null })];
+		const result = planImport([payload({ energyKwh: 0 })], existing, [], baseOpts);
+		expect(result.update).toEqual([]);
+	});
+
+	it('non-zero energyKwh is never tombstoned by rule 2', () => {
+		const result = planImport([payload({ energyKwh: 0.001 })], [], [], baseOpts);
+		expect(result.tombstone).toEqual([]);
+		expect(result.insert).toHaveLength(1);
+	});
+
+	it('rule 3: a session before windowStart -> outside_window', () => {
 		const result = planImport(
 			[payload({ startDate: '2026-07-31T00:00:00.000Z' })],
 			[],
@@ -212,52 +249,45 @@ describe('planImport', () => {
 		expect(result.insert).toEqual([]);
 	});
 
-	it('rule 2: a session exactly at windowStart is inside the window', () => {
+	it('rule 3: a session exactly at windowStart is inside the window', () => {
 		const result = planImport([payload({ startDate: baseOpts.windowStart })], [], [], baseOpts);
 		expect(result.insert).toHaveLength(1);
 	});
 
-	it('rule 3: an externalId in the dismissed list is skipped', () => {
+	it('rule 4: an externalId in the dismissed list is skipped', () => {
 		const result = planImport([payload()], [], ['evnex-session-1'], baseOpts);
 		expect(result.skipped).toEqual([{ externalId: 'evnex-session-1', reason: 'dismissed' }]);
 		expect(result.insert).toEqual([]);
 	});
 
-	it('rule 4: no existing row -> inserts a draft, even mid-charge (kwhUsed null)', () => {
+	it('rule 5: no existing row -> inserts a draft, even mid-charge (kwhUsed null)', () => {
 		const result = planImport([payload({ energyKwh: null })], [], [], baseOpts);
 		expect(result.insert).toHaveLength(1);
 		expect(result.insert[0]).toMatchObject({ externalId: 'evnex-session-1', kwhUsed: null });
 	});
 
-	it('rule 5: existing row with kwhUsed already set -> already_complete, never overwritten', () => {
+	it('rule 6: existing row with kwhUsed already set -> already_complete, never overwritten', () => {
 		const existing = [existingRow({ id: 7, kwhUsed: 12.3 })];
 		const result = planImport([payload({ energyKwh: 99 })], existing, [], baseOpts);
 		expect(result.skipped).toEqual([{ externalId: 'evnex-session-1', reason: 'already_complete' }]);
 		expect(result.update).toEqual([]);
 	});
 
-	it('rule 6: existing row, kwhUsed null, energyKwh still null -> still_charging', () => {
+	it('rule 7: existing row, kwhUsed null, energyKwh still null -> still_charging', () => {
 		const existing = [existingRow({ id: 7, kwhUsed: null })];
 		const result = planImport([payload({ energyKwh: null })], existing, [], baseOpts);
 		expect(result.skipped).toEqual([{ externalId: 'evnex-session-1', reason: 'still_charging' }]);
 		expect(result.update).toEqual([]);
 	});
 
-	it('the falsy trap: energyKwh === 0 is treated as present, not still-charging', () => {
-		const existing = [existingRow({ id: 7, kwhUsed: null })];
-		const result = planImport([payload({ energyKwh: 0 })], existing, [], baseOpts);
-		expect(result.skipped).toEqual([]);
-		expect(result.update).toEqual([{ id: 7, kwhUsed: 0 }]);
-	});
-
-	it('rule 7: existing row, kwhUsed null, energyKwh present -> update', () => {
+	it('rule 8: existing row, kwhUsed null, energyKwh present -> update', () => {
 		const existing = [existingRow({ id: 7, kwhUsed: null })];
 		const result = planImport([payload({ energyKwh: 15.4 })], existing, [], baseOpts);
 		expect(result.update).toEqual([{ id: 7, kwhUsed: 15.4 }]);
 		expect(result.skipped).toEqual([]);
 	});
 
-	it('rule 8: an update whose billing period is already submitted -> period_submitted', () => {
+	it('rule 9: an update whose billing period is already submitted -> period_submitted', () => {
 		const existing = [existingRow({ id: 7, kwhUsed: null, billingPeriodId: 99 })];
 		const opts = { ...baseOpts, submittedPeriodIds: [99] };
 		const result = planImport([payload({ energyKwh: 15.4 })], existing, [], opts);
@@ -265,7 +295,7 @@ describe('planImport', () => {
 		expect(result.skipped).toEqual([{ externalId: 'evnex-session-1', reason: 'period_submitted' }]);
 	});
 
-	it('rule 8 does not fire when the billing period is not in submittedPeriodIds', () => {
+	it('rule 9 does not fire when the billing period is not in submittedPeriodIds', () => {
 		const existing = [existingRow({ id: 7, kwhUsed: null, billingPeriodId: 99 })];
 		const opts = { ...baseOpts, submittedPeriodIds: [1, 2, 3] };
 		const result = planImport([payload({ energyKwh: 15.4 })], existing, [], opts);
@@ -277,13 +307,19 @@ describe('planImport', () => {
 			payload({ id: 'a', startDate: null }), // unmappable
 			payload({ id: 'b', sessionStatus: 'Invalid' }), // invalid
 			payload({ id: 'c', startDate: '2026-07-01T00:00:00.000Z' }), // outside_window
-			payload({ id: 'd' }) // fresh insert
+			payload({ id: 'd' }), // fresh insert
+			payload({ id: 'e', energyKwh: 0 }) // zero_energy
 		];
 		const result = planImport(remote, [], [], baseOpts);
 		expect(result.insert.map((d) => d.externalId)).toEqual(['d']);
-		expect(result.tombstone).toEqual(['b']);
+		expect(result.tombstone).toEqual(['b', 'e']);
 		const reasons = Object.fromEntries(result.skipped.map((s) => [s.externalId, s.reason]));
-		expect(reasons).toEqual({ a: 'unmappable', b: 'invalid', c: 'outside_window' });
+		expect(reasons).toEqual({
+			a: 'unmappable',
+			b: 'invalid',
+			c: 'outside_window',
+			e: 'zero_energy'
+		});
 	});
 
 	it('ignores existing rows that are manual (externalId null) when matching', () => {

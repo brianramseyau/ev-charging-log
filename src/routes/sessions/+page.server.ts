@@ -449,16 +449,33 @@ export const actions: Actions = {
 		}
 
 		const invalidAfterImportSessions = planResult.skipped
-			.filter((s) => s.reason === 'invalid_after_import')
+			.filter((s) => s.reason === 'invalid_after_import' || s.reason === 'zero_energy_after_import')
 			.map((s) => {
 				const existing = existingRows.find((r) => r.externalId === s.externalId);
 				return existing ? `${existing.date} ${existing.time}` : s.externalId;
 			});
 
+		// planImport tombstones both Invalid sessions and zero-energy ones (plan-equivalent
+		// rules 1 and 2) — record which is which rather than always writing 'invalid', so
+		// evnex_dismissed_sessions stays an honest audit trail of *why* a session never
+		// reappears.
+		const tombstoneReasonByExternalId = new Map<string, 'invalid' | 'zero_energy'>();
+		for (const s of planResult.skipped) {
+			if (s.reason === 'invalid' || s.reason === 'invalid_after_import') {
+				tombstoneReasonByExternalId.set(s.externalId, 'invalid');
+			} else if (s.reason === 'zero_energy' || s.reason === 'zero_energy_after_import') {
+				tombstoneReasonByExternalId.set(s.externalId, 'zero_energy');
+			}
+		}
+
 		db.transaction((tx) => {
 			for (const externalId of planResult.tombstone) {
 				tx.insert(evnexDismissedSessions)
-					.values({ externalId, dismissedAt: new Date().toISOString(), reason: 'invalid' })
+					.values({
+						externalId,
+						dismissedAt: new Date().toISOString(),
+						reason: tombstoneReasonByExternalId.get(externalId) ?? 'invalid'
+					})
 					.onConflictDoNothing()
 					.run();
 			}

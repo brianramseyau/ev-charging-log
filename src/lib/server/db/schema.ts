@@ -96,5 +96,5 @@ export const evnexDismissedSessions = sqliteTable('evnex_dismissed_sessions', {
 	// Why this session is tombstoned. Not load-bearing for the import decision —
 	// presence in this table is enough — but it's the only way to answer "why does
 	// this session never appear?" without guessing.
-	reason: text('reason', { enum: ['user_deleted', 'invalid'] }).notNull()
+	reason: text('reason', { enum: ['user_deleted', 'invalid', 'zero_energy'] }).notNull()
 });

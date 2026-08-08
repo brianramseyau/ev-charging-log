@@ -210,7 +210,7 @@
 					label="kWh used (optional)"
 					bind:value={kwhUsed}
 					input$name="kwhUsed"
-					input$step="0.01"
+					input$step="0.001"
 					input$min="0"
 					style="width: 100%"
 					invalid={!!errors.kwhUsed}
@@ -307,7 +307,9 @@
 	<p class="save-feedback__ok">{formatPollSummary(pollSummary)}</p>
 	{#if pollSummary.tombstoned > 0}
 		<p class="save-feedback__note">
-			{pollSummary.tombstoned} invalid session{pollSummary.tombstoned === 1 ? '' : 's'} dismissed.
+			{pollSummary.tombstoned} invalid or zero-energy session{pollSummary.tombstoned === 1
+				? ''
+				: 's'} dismissed.
 		</p>
 	{/if}
 	{#if pollSummary.invalidAfterImport.length > 0}
@@ -315,7 +317,9 @@
 			{pollSummary.invalidAfterImport.length} previously imported session{pollSummary
 				.invalidAfterImport.length === 1
 				? ''
-				: 's'} marked invalid by the charger — review: {pollSummary.invalidAfterImport.join(', ')}.
+				: 's'} marked invalid or zero-energy by the charger — review: {pollSummary.invalidAfterImport.join(
+				', '
+			)}.
 		</p>
 	{/if}
 {/if}
@@ -404,7 +408,7 @@
 								<input
 									type="number"
 									name="kwhUsed"
-									step="0.01"
+									step="0.001"
 									min="0"
 									required
 									class:invalid={completeErrorId === session.id && !!completeError}
