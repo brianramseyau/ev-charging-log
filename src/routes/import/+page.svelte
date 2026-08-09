@@ -191,7 +191,8 @@
 
 <style>
 	h1 {
-		margin-top: 0;
+		font-size: 1.3rem;
+		margin: 0 0 1rem;
 	}
 
 	.error {

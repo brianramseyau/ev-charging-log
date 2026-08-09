@@ -223,8 +223,8 @@
 
 <style>
 	h1 {
-		font-size: 1.25rem;
-		margin-bottom: 1rem;
+		font-size: 1.3rem;
+		margin: 0 0 1rem;
 	}
 
 	h2 {
