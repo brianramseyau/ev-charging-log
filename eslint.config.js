@@ -34,6 +34,15 @@ export default defineConfig(
 		}
 	},
 	{
+		// .cjs files are deliberately CommonJS despite "type": "module" in
+		// package.json (Electron's main process needs require()), so the
+		// ESM-only lint rule doesn't apply here.
+		files: ['**/*.cjs'],
+		rules: {
+			'@typescript-eslint/no-require-imports': 'off'
+		}
+	},
+	{
 		// Override or add rule settings here, such as:
 		// 'svelte/button-has-type': 'error'
 		rules: {}

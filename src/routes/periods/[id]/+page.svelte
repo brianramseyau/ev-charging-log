@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { enhance } from '$app/forms';
+	import { resolve } from '$app/paths';
 	import Button, { Label } from '@smui/button';
 	import Card from '@smui/card';
 	import {
@@ -33,7 +34,7 @@
 	<title>{data.period.label} — EV Charging Log</title>
 </svelte:head>
 
-<a class="back-link" href="/periods">&larr; All periods</a>
+<a class="back-link" href={resolve('/periods')}>&larr; All periods</a>
 
 <div class="header-row">
 	<div>
@@ -68,7 +69,11 @@
 	</div>
 </Card>
 
-<a class="export-link" href="/periods/{data.period.id}/export" data-sveltekit-reload>
+<a
+	class="export-link"
+	href={resolve('/periods/[id]/export', { id: String(data.period.id) })}
+	data-sveltekit-reload
+>
 	<Button variant="raised">
 		<Label>Export report (.xlsx)</Label>
 	</Button>
@@ -83,7 +88,7 @@
 		{data.draftSessions.length}
 		{data.draftSessions.length === 1 ? 'draft session is' : 'draft sessions are'} missing kWh — complete
 		{data.draftSessions.length === 1 ? 'it' : 'them'} on the
-		<a href="/sessions">Sessions page</a> before submitting this period.
+		<a href={resolve('/sessions')}>Sessions page</a> before submitting this period.
 	</p>
 {/if}
 

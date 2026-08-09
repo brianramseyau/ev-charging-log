@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { page } from '$app/state';
+	import { resolve } from '$app/paths';
 	import crashedEv from '$lib/assets/crashed-ev.svg';
 </script>
 
@@ -9,7 +10,7 @@
 	<p class="error-page__status">
 		{page.status}{page.error?.message ? ` — ${page.error.message}` : ''}
 	</p>
-	<a class="error-page__home" href="/">Back to safety</a>
+	<a class="error-page__home" href={resolve('/')}>Back to safety</a>
 </div>
 
 <style>

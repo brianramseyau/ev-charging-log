@@ -1,5 +1,6 @@
 <script lang="ts">
 	import Button from '@smui/button';
+	import { resolve } from '$app/paths';
 	import type { ActionData } from './$types';
 
 	let { form }: { form: ActionData } = $props();
@@ -182,11 +183,11 @@
 	<p class="success">
 		Imported {form.sessionCount} session(s) into billing period "{form.label}".
 	</p>
-	<a href="/import">Import another file</a>
+	<a href={resolve('/import')}>Import another file</a>
 {:else if form.step === 'commit-error'}
 	<p class="error">{form.error}</p>
 	<p>Go back and re-upload the file to try again.</p>
-	<a href="/import">Back to upload</a>
+	<a href={resolve('/import')}>Back to upload</a>
 {/if}
 
 <style>

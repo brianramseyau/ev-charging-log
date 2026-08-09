@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { page } from '$app/state';
 	import { browser } from '$app/environment';
+	import { resolve } from '$app/paths';
 	import { mdiViewDashboard, mdiLightningBolt, mdiCalendarRange, mdiTune, mdiCog } from '@mdi/js';
 	import logo from '$lib/assets/logo.svg';
 	import Icon from '$lib/components/Icon.svelte';
@@ -16,11 +17,11 @@
 	}
 
 	const navItems = [
-		{ href: '/', label: 'Dashboard', icon: mdiViewDashboard },
-		{ href: '/sessions', label: 'Sessions', icon: mdiLightningBolt },
-		{ href: '/periods', label: 'Periods', icon: mdiCalendarRange },
-		{ href: '/rates', label: 'Rates', icon: mdiTune },
-		{ href: '/settings', label: 'Settings', icon: mdiCog }
+		{ href: resolve('/'), label: 'Dashboard', icon: mdiViewDashboard },
+		{ href: resolve('/sessions'), label: 'Sessions', icon: mdiLightningBolt },
+		{ href: resolve('/periods'), label: 'Periods', icon: mdiCalendarRange },
+		{ href: resolve('/rates'), label: 'Rates', icon: mdiTune },
+		{ href: resolve('/settings'), label: 'Settings', icon: mdiCog }
 	];
 
 	function isActive(href: string) {
