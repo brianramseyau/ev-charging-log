@@ -1,14 +1,7 @@
 <script lang="ts">
 	import { page } from '$app/state';
 	import { browser } from '$app/environment';
-	import {
-		mdiViewDashboard,
-		mdiLightningBolt,
-		mdiCalendarRange,
-		mdiTune,
-		mdiTrayArrowUp,
-		mdiCog
-	} from '@mdi/js';
+	import { mdiViewDashboard, mdiLightningBolt, mdiCalendarRange, mdiTune, mdiCog } from '@mdi/js';
 	import logo from '$lib/assets/logo.svg';
 	import Icon from '$lib/components/Icon.svelte';
 
@@ -27,7 +20,7 @@
 		{ href: '/sessions', label: 'Sessions', icon: mdiLightningBolt },
 		{ href: '/periods', label: 'Periods', icon: mdiCalendarRange },
 		{ href: '/rates', label: 'Rates', icon: mdiTune },
-		{ href: '/import', label: 'Import', icon: mdiTrayArrowUp }
+		{ href: '/settings', label: 'Settings', icon: mdiCog }
 	];
 
 	function isActive(href: string) {
@@ -39,9 +32,6 @@
 	<header class="app-bar">
 		<img src={logo} alt="" class="app-bar__logo" width="28" height="28" />
 		<span class="app-bar__title">EV Charging Log</span>
-		<a href="/settings" class="app-bar__settings" aria-label="Settings">
-			<Icon path={mdiCog} size={22} />
-		</a>
 	</header>
 
 	<main class="app-content">
@@ -106,12 +96,6 @@
 		font-size: 1.05rem;
 		font-weight: 600;
 		flex: 1;
-	}
-
-	.app-bar__settings {
-		display: flex;
-		color: inherit;
-		opacity: 0.9;
 	}
 
 	.app-content {

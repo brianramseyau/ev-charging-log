@@ -271,6 +271,17 @@
 	</Content>
 </Card>
 
+<h2 class="section-title">Historical import</h2>
+<p class="page-subtitle">Import sessions from a legacy monthly spreadsheet.</p>
+
+<Card padded>
+	<Content>
+		<Button variant="outlined" href="/import" style="width: 100%">
+			<Label>Go to import</Label>
+		</Button>
+	</Content>
+</Card>
+
 <style>
 	.page-title {
 		font-size: 1.3rem;
