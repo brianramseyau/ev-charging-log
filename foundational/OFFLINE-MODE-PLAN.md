@@ -61,7 +61,7 @@ around it: `NetworkFirst` on navigation HTML, a second `NetworkFirst` cache for
 SvelteKit's `__data.json` payloads, and a precached `/offline` fallback for
 routes never visited. That works, but it means three caching layers, pages
 rendered from HTML with stale data baked into it, and an offline write path
-that exists *alongside* the online one and therefore only ever executes when
+that exists _alongside_ the online one and therefore only ever executes when
 offline — the classic arrangement where sync code rots untested and fails in
 the field.
 
@@ -88,7 +88,7 @@ Setting `export const ssr = false` while keeping `+page.server.ts` loads does
 first paint, keeps the coupling, and still requires the `__data.json` cache
 layer. Strictly worse than either option.
 
-The detachment *is* the move of loads and actions to endpoints. `ssr = false`
+The detachment _is_ the move of loads and actions to endpoints. `ssr = false`
 is a consequence of it, not the mechanism.
 
 ### 3.4 This reverses a founding decision, deliberately
@@ -105,12 +105,12 @@ documents rather than left to silently contradict them (§11).
 
 ### 4.1 Keep universal loads — the read path stays close to mechanical
 
-The choice is not "loads or no loads", it is *where* the load runs:
+The choice is not "loads or no loads", it is _where_ the load runs:
 
-| | Runs | Data source |
-| --- | --- | --- |
-| `+page.server.ts` (today) | Server only | Direct Drizzle calls |
-| `+page.ts` (universal) | Browser, given `ssr = false` | `fetch('/api/…')` |
+|                           | Runs                         | Data source          |
+| ------------------------- | ---------------------------- | -------------------- |
+| `+page.server.ts` (today) | Server only                  | Direct Drizzle calls |
+| `+page.ts` (universal)    | Browser, given `ssr = false` | `fetch('/api/…')`    |
 
 `+page.svelte` still receives a `data` prop of the same shape, and
 `invalidateAll()` still re-runs the load after a mutation — the natural
@@ -142,15 +142,15 @@ disappear.
 
 Inventory: **6 server loads, ~15 actions across 6 files.**
 
-| Route | Load | Actions |
-| --- | --- | --- |
-| `/` (dashboard) | yes | — |
-| `/sessions` | yes | create, complete, delete |
-| `/periods` | yes | yes |
-| `/periods/[id]` | yes | yes |
-| `/rates` | yes | yes |
-| `/settings` | yes | yes |
-| `/import` | — | yes |
+| Route           | Load | Actions                  |
+| --------------- | ---- | ------------------------ |
+| `/` (dashboard) | yes  | —                        |
+| `/sessions`     | yes  | create, complete, delete |
+| `/periods`      | yes  | yes                      |
+| `/periods/[id]` | yes  | yes                      |
+| `/rates`        | yes  | yes                      |
+| `/settings`     | yes  | yes                      |
+| `/import`       | —    | yes                      |
 
 ### 4.3 Route layout
 
@@ -215,7 +215,7 @@ shell instead of pre-rendered HTML.
 ### 5.1 Do not give Electron its own SSR build
 
 Maintaining SSR for Electron while the web build is detached would mean every
-route existing twice — a `+page.server.ts` load *and* an endpoint/client-load
+route existing twice — a `+page.server.ts` load _and_ an endpoint/client-load
 pair — permanently, in two rendering modes required to stay behaviourally
 identical. That is the dual-path drift problem applied to the whole app, the
 exact opposite of the surface-area reduction this plan exists to achieve. There
@@ -230,7 +230,7 @@ export, and the import parser, and Electron's fork model depends on it.
 
 ### 5.3 The one genuine Electron bug to avoid
 
-In Electron the SvelteKit server is a local child process and is *always*
+In Electron the SvelteKit server is a local child process and is _always_
 reachable, but `navigator.onLine` reports the **machine's** internet
 connectivity. Working offline on a laptop would otherwise produce:
 
@@ -262,17 +262,17 @@ happen. No config fork beyond that.
 ### 6.1 Service worker
 
 Switch `@vite-pwa/sveltekit` from `generateSW` to `strategies: 'injectManifest'`
-with a custom worker at **`src/sw.ts`** — deliberately *not*
+with a custom worker at **`src/sw.ts`** — deliberately _not_
 `src/service-worker.ts`, which SvelteKit auto-registers and would fight the
 plugin.
 
 With the frontend detached, caching reduces to two concerns:
 
-| Target | Strategy | Notes |
-| --- | --- | --- |
-| App shell + build assets + icons | Precache | The shell is always available, so no `/offline` fallback route is needed |
-| `/api/*` GET responses | `NetworkFirst` | Short timeout; serves last-known data offline |
-| `/api/sync`, `/api/ping`, export, import | Never cached | |
+| Target                                   | Strategy       | Notes                                                                    |
+| ---------------------------------------- | -------------- | ------------------------------------------------------------------------ |
+| App shell + build assets + icons         | Precache       | The shell is always available, so no `/offline` fallback route is needed |
+| `/api/*` GET responses                   | `NetworkFirst` | Short timeout; serves last-known data offline                            |
+| `/api/sync`, `/api/ping`, export, import | Never cached   |                                                                          |
 
 Pages served from cached API data show a subtle "showing saved data" note.
 
@@ -282,7 +282,9 @@ Pages served from cached API data show a subtle "showing saved data" note.
   `session.create`, `session.complete`, `session.delete`.
 
   ```ts
-  { clientId: uuid, op, payload, createdAt, attempts, lastError }
+  {
+  	clientId: (uuid, op, payload, createdAt, attempts, lastError);
+  }
   ```
 
 - `src/lib/offline/sync.ts` — flush with backoff, reconciling per-operation
@@ -333,7 +335,7 @@ App load, `online` event, `visibilitychange`, manual **Sync now**, and
 Background Sync where available.
 
 **Background Sync is Chrome/Android only** — iOS Safari has never shipped it.
-On an iPhone the foreground triggers *are* the mechanism, not a fallback, and
+On an iPhone the foreground triggers _are_ the mechanism, not a fallback, and
 the design must not assume otherwise.
 
 ---
@@ -344,11 +346,11 @@ the design must not assume otherwise.
 before the settings cog (`src/routes/+layout.svelte:42`), using the existing
 `Icon.svelte` + `@mdi/js` pattern.
 
-| State | Icon | Colour |
-| --- | --- | --- |
-| Reachable, outbox empty | `mdiCloudCheck` | green `#4ade80` |
-| Unreachable | `mdiCloudOffOutline` | red `#f87171` |
-| Pending count | numeric badge | |
+| State                   | Icon                 | Colour          |
+| ----------------------- | -------------------- | --------------- |
+| Reachable, outbox empty | `mdiCloudCheck`      | green `#4ade80` |
+| Unreachable             | `mdiCloudOffOutline` | red `#f87171`   |
+| Pending count           | numeric badge        |                 |
 
 Colours are chosen for contrast against the teal `#0f766e` app bar rather than
 raw `#22c55e` / `#ef4444`.
@@ -394,14 +396,14 @@ and a discard action.
 
 Each phase should land green (`npm run check`, `npm run lint`, `npm run test`).
 
-| # | Phase | Notes |
-| --- | --- | --- |
-| 1 | **Detach** — endpoints + universal loads + `ssr = false` | Pure refactor, no offline behaviour. Recommended: spike `/sessions` end-to-end first to confirm the diff shape before doing the other five. |
-| 2 | Shell precache + `/api/*` runtime caching + `/api/ping` | Custom `src/sw.ts`, `injectManifest` |
-| 3 | `client_id` migration + `/api/sync` | The correctness core (§6.3) |
-| 4 | Outbox + sync engine | `src/lib/offline/*` |
-| 5 | Cloud indicator + detail sheet | §7 |
-| 6 | Playwright verification + documentation updates | §8, §11 |
+| #   | Phase                                                    | Notes                                                                                                                                       |
+| --- | -------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1   | **Detach** — endpoints + universal loads + `ssr = false` | Pure refactor, no offline behaviour. Recommended: spike `/sessions` end-to-end first to confirm the diff shape before doing the other five. |
+| 2   | Shell precache + `/api/*` runtime caching + `/api/ping`  | Custom `src/sw.ts`, `injectManifest`                                                                                                        |
+| 3   | `client_id` migration + `/api/sync`                      | The correctness core (§6.3)                                                                                                                 |
+| 4   | Outbox + sync engine                                     | `src/lib/offline/*`                                                                                                                         |
+| 5   | Cloud indicator + detail sheet                           | §7                                                                                                                                          |
+| 6   | Playwright verification + documentation updates          | §8, §11                                                                                                                                     |
 
 ### 9.1 Scope reduction, if phase 1 proves too large
 
@@ -415,10 +417,10 @@ since everything else is home-wifi work.
 
 ## 10. Open decisions
 
-| # | Question | Default if unanswered |
-| --- | --- | --- |
-| 1 | Amber `mdiCloudSync` state for "online, changes still in flight"? Without it the icon reads green while work is genuinely outstanding. | Green/red only, per the original request, plus the pending-count badge |
-| 2 | Full six-route detachment, or the two-route reduction in §9.1? | Full, decided after the `/sessions` spike |
+| #   | Question                                                                                                                               | Default if unanswered                                                  |
+| --- | -------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------- |
+| 1   | Amber `mdiCloudSync` state for "online, changes still in flight"? Without it the icon reads green while work is genuinely outstanding. | Green/red only, per the original request, plus the pending-count badge |
+| 2   | Full six-route detachment, or the two-route reduction in §9.1?                                                                         | Full, decided after the `/sessions` spike                              |
 
 ---
 
