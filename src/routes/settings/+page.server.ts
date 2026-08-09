@@ -199,7 +199,7 @@ export const actions: Actions = {
 			});
 		}
 
-		let chargePoints: EvnexChargePointInfo[] = [];
+		let chargePoints: EvnexChargePointInfo[];
 		try {
 			const orgId = await fetchOrgId(tokenSet.accessToken);
 			await db.update(evnexIntegration).set({ orgId }).where(eqId(integrationRow.id));

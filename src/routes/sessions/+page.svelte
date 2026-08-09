@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { enhance } from '$app/forms';
+	import { resolve } from '$app/paths';
 	import { untrack } from 'svelte';
 	import Button, { Label } from '@smui/button';
 	import Card, { Content } from '@smui/card';
@@ -300,7 +301,7 @@
 </div>
 {#if !data.evnexReady}
 	<p class="field-hint">
-		<a href="/settings">Set up the Evnex integration</a> to pull sessions automatically.
+		<a href={resolve('/settings')}>Set up the Evnex integration</a> to pull sessions automatically.
 	</p>
 {/if}
 {#if pollSummary}

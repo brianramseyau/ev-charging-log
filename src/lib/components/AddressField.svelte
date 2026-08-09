@@ -10,6 +10,7 @@
 	import TextfieldIcon from '@smui/textfield/icon';
 	import { mdiClose, mdiCrosshairsGps } from '@mdi/js';
 	import Icon from '$lib/components/Icon.svelte';
+	import { SvelteURLSearchParams } from 'svelte/reactivity';
 
 	let {
 		value = $bindable(''),
@@ -61,7 +62,7 @@
 		const controller = new AbortController();
 		abortController = controller;
 
-		const params = new URLSearchParams({ q: query });
+		const params = new SvelteURLSearchParams({ q: query });
 		if (biasPosition) {
 			params.set('lat', String(biasPosition.lat));
 			params.set('lon', String(biasPosition.lon));

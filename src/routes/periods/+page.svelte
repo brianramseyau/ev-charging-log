@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { enhance } from '$app/forms';
+	import { resolve } from '$app/paths';
 	import Button, { Label } from '@smui/button';
 	import Card from '@smui/card';
 	import Textfield from '@smui/textfield';
@@ -88,7 +89,7 @@
 	<ul class="period-list">
 		{#each data.periods as period (period.id)}
 			<li>
-				<a class="period-card" href="/periods/{period.id}">
+				<a class="period-card" href={resolve('/periods/[id]', { id: String(period.id) })}>
 					<Card padded>
 						<div class="period-card__row">
 							<strong>{period.label}</strong>

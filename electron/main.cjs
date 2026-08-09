@@ -129,7 +129,9 @@ async function startServer() {
 	try {
 		await waitForServer(port, 15000, () => exited);
 	} catch (err) {
-		throw new Error(`${err.message}${output ? `\n\nServer output:\n${output}` : ''}`);
+		throw new Error(`${err.message}${output ? `\n\nServer output:\n${output}` : ''}`, {
+			cause: err
+		});
 	}
 	return port;
 }
