@@ -39,10 +39,6 @@
 		evnexEnabled = data.evnex.enabled;
 	});
 
-	const selectedChargePoint = $derived(
-		data.chargePoints.find((p) => p.id === selectedChargePointId) ?? null
-	);
-
 	function formatLastPolled(iso: string | null) {
 		if (!iso) return 'never polled';
 		const then = new Date(iso).getTime();
@@ -197,76 +193,83 @@
 				{/if}
 			{/if}
 
-			{#if data.chargePointsError}
-				<p class="evnex-warning">{data.chargePointsError}</p>
-			{/if}
+			{#await data.chargePoints}
+				<p class="evnex-loading">Loading charge points…</p>
+			{:then { chargePoints, chargePointsError }}
+				{@const selectedChargePoint =
+					chargePoints.find((p) => p.id === selectedChargePointId) ?? null}
 
-			<form
-				method="POST"
-				action="?/saveEvnex"
-				class="settings-form"
-				use:enhance={() => {
-					saving = true;
-					return async ({ update }) => {
-						saving = false;
-						// reset: false — the default `update()` calls the native
-						// HTMLFormElement.reset(), which stomps the number Textfield's DOM
-						// value out from under its `bind:value`. Since the round-tripped
-						// value is textually unchanged, Svelte's reactivity sees no change
-						// and never re-syncs the DOM, leaving the field blank and the next
-						// save failing validation. State is already restored from `data` by
-						// the $effect above, so the native reset is redundant here anyway.
-						await update({ reset: false });
-					};
-				}}
-			>
-				<Select
-					variant="outlined"
-					label="Charge point"
-					bind:value={selectedChargePointId}
-					style="width: 100%"
+				{#if chargePointsError}
+					<p class="evnex-warning">{chargePointsError}</p>
+				{/if}
+
+				<form
+					method="POST"
+					action="?/saveEvnex"
+					class="settings-form"
+					use:enhance={() => {
+						saving = true;
+						return async ({ update }) => {
+							saving = false;
+							// reset: false — the default `update()` calls the native
+							// HTMLFormElement.reset(), which stomps the number Textfield's DOM
+							// value out from under its `bind:value`. Since the round-tripped
+							// value is textually unchanged, Svelte's reactivity sees no change
+							// and never re-syncs the DOM, leaving the field blank and the next
+							// save failing validation. State is already restored from `data` by
+							// the $effect above, so the native reset is redundant here anyway.
+							await update({ reset: false });
+						};
+					}}
 				>
-					{#each data.chargePoints as point (point.id)}
-						<Option value={point.id}>{point.name}</Option>
-					{/each}
-				</Select>
-				<input type="hidden" name="chargePointId" value={selectedChargePointId ?? ''} />
-				<input type="hidden" name="chargePointName" value={selectedChargePoint?.name ?? ''} />
-				<input
-					type="hidden"
-					name="chargePointTimeZone"
-					value={selectedChargePoint?.timeZone ?? ''}
-				/>
+					<Select
+						variant="outlined"
+						label="Charge point"
+						bind:value={selectedChargePointId}
+						style="width: 100%"
+					>
+						{#each chargePoints as point (point.id)}
+							<Option value={point.id}>{point.name}</Option>
+						{/each}
+					</Select>
+					<input type="hidden" name="chargePointId" value={selectedChargePointId ?? ''} />
+					<input type="hidden" name="chargePointName" value={selectedChargePoint?.name ?? ''} />
+					<input
+						type="hidden"
+						name="chargePointTimeZone"
+						value={selectedChargePoint?.timeZone ?? ''}
+					/>
 
-				<Textfield
-					variant="outlined"
-					type="number"
-					label="Import sessions from the last"
-					suffix="days"
-					bind:value={importLookbackDays}
-					input$name="importLookbackDays"
-					input$min="1"
-					input$step="1"
-					style="width: 100%"
-				/>
+					<Textfield
+						variant="outlined"
+						type="number"
+						label="Import sessions from the last"
+						suffix="days"
+						bind:value={importLookbackDays}
+						input$name="importLookbackDays"
+						input$min="1"
+						input$step="1"
+						style="width: 100%"
+					/>
 
-				<FormField>
-					<Switch bind:checked={evnexEnabled} />
-					{#snippet label()}Enabled{/snippet}
-				</FormField>
-				<input type="hidden" name="enabled" value={evnexEnabled ? 'true' : 'false'} />
+					<FormField>
+						<Switch bind:checked={evnexEnabled} />
+						{#snippet label()}Enabled{/snippet}
+					</FormField>
+					<input type="hidden" name="enabled" value={evnexEnabled ? 'true' : 'false'} />
 
-				<Button variant="raised" type="submit" disabled={saving} style="width: 100%">
-					<Label>{saving ? 'Saving…' : 'Save'}</Label>
-				</Button>
+					<Button variant="raised" type="submit" disabled={saving} style="width: 100%">
+						<Label>{saving ? 'Saving…' : 'Save'}</Label>
+					</Button>
 
-				{#if form?.savedEvnex}
-					<p class="settings-form__ok">Saved.</p>
-				{/if}
-				{#if form?.saveError}
-					<p class="settings-form__error">{form.saveError}</p>
-				{/if}
-			</form>
+					{#if form?.savedEvnex}
+						<p class="settings-form__ok">Saved.</p>
+					{/if}
+					{#if form?.saveError}
+						<p class="settings-form__error">{form.saveError}</p>
+					{/if}
+				</form>
+			{/await}
 		{/if}
 	</Content>
 </Card>
@@ -358,6 +361,12 @@
 		font-size: 0.9rem;
 	}
 
+	.evnex-loading {
+		color: #64748b;
+		font-size: 0.85rem;
+		margin: 0;
+	}
+
 	@media (prefers-color-scheme: dark) {
 		.page-subtitle {
 			color: #94a3b8;
@@ -368,6 +377,10 @@
 		}
 
 		.field-hint {
+			color: #94a3b8;
+		}
+
+		.evnex-loading {
 			color: #94a3b8;
 		}
 

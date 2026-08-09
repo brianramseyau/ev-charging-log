@@ -29,6 +29,55 @@ function eqId(id: number) {
 	return eq(evnexIntegration.id, id);
 }
 
+type ChargePointsResult = {
+	chargePoints: EvnexChargePointInfo[];
+	chargePointsError: string | null;
+};
+
+// Hits the Evnex API (token refresh + org lookup + charge-point list), so it's kept
+// as its own promise-returning function and deliberately *not* awaited in `load` —
+// SvelteKit streams a non-top-level-awaited promise to the browser instead of
+// blocking the whole page behind a flaky third-party API (plan §... Evnex is
+// unofficial/undocumented, see evnex-client.ts's module doc comment).
+async function loadChargePoints(integration: EvnexIntegrationRow): Promise<ChargePointsResult> {
+	try {
+		const accessToken = await ensureAccessToken(integration);
+		let orgId = integration.orgId;
+		if (orgId == null) {
+			orgId = await fetchOrgId(accessToken);
+			await db.update(evnexIntegration).set({ orgId }).where(eqId(integration.id));
+		}
+		const chargePoints = await fetchChargePoints(accessToken, orgId);
+		return { chargePoints, chargePointsError: null };
+	} catch (err) {
+		// Never let a flaky Evnex API error the whole /settings page — fall back to
+		// showing just the already-selected charger (if any) and a note. The
+		// Reconnect state (auth_failed) is handled separately, in `load`. Surface the
+		// real error (status + correlation id, never a raw token) rather than a
+		// generic string, and log it server-side too — this endpoint contract is
+		// unverified against a live account (see evnex-client.ts's module doc
+		// comment), so a specific message here is the only way to diagnose it.
+		console.error('[evnex] /settings charge-point list failed:', err);
+		const chargePointsError =
+			err instanceof EvnexApiError
+				? `Could not list charge points: ${err.message}${err.correlationId ? ` (ref: ${err.correlationId})` : ''}`
+				: err instanceof EvnexClientNetworkError || err instanceof EvnexAuthNetworkError
+					? `Could not reach Evnex to list charge points: ${err.message}`
+					: `Something went wrong listing charge points: ${err instanceof Error ? err.message : String(err)}`;
+		const chargePoints =
+			integration.chargePointId && integration.chargePointName
+				? [
+						{
+							id: integration.chargePointId,
+							name: integration.chargePointName,
+							timeZone: integration.chargePointTimeZone ?? ''
+						}
+					]
+				: [];
+		return { chargePoints, chargePointsError };
+	}
+}
+
 export const load: PageServerLoad = async () => {
 	const [settingsRow, integration] = await Promise.all([
 		db
@@ -45,45 +94,6 @@ export const load: PageServerLoad = async () => {
 			: integration.lastPollStatus === 'auth_failed'
 				? 'auth_failed'
 				: 'connected';
-
-	let chargePoints: EvnexChargePointInfo[] = [];
-	let chargePointsError: string | null = null;
-
-	if (cardState === 'connected' && integration) {
-		try {
-			const accessToken = await ensureAccessToken(integration);
-			let orgId = integration.orgId;
-			if (orgId == null) {
-				orgId = await fetchOrgId(accessToken);
-				await db.update(evnexIntegration).set({ orgId }).where(eqId(integration.id));
-			}
-			chargePoints = await fetchChargePoints(accessToken, orgId);
-		} catch (err) {
-			// Never let a flaky Evnex API error the whole /settings page — fall back to
-			// showing just the already-selected charger (if any) and a note. The
-			// Reconnect state (auth_failed) is handled separately, above. Surface the
-			// real error (status + correlation id, never a raw token) rather than a
-			// generic string, and log it server-side too — this endpoint contract is
-			// unverified against a live account (see evnex-client.ts's module doc
-			// comment), so a specific message here is the only way to diagnose it.
-			console.error('[evnex] /settings charge-point list failed:', err);
-			chargePointsError =
-				err instanceof EvnexApiError
-					? `Could not list charge points: ${err.message}${err.correlationId ? ` (ref: ${err.correlationId})` : ''}`
-					: err instanceof EvnexClientNetworkError || err instanceof EvnexAuthNetworkError
-						? `Could not reach Evnex to list charge points: ${err.message}`
-						: `Something went wrong listing charge points: ${err instanceof Error ? err.message : String(err)}`;
-			if (integration.chargePointId && integration.chargePointName) {
-				chargePoints = [
-					{
-						id: integration.chargePointId,
-						name: integration.chargePointName,
-						timeZone: integration.chargePointTimeZone ?? ''
-					}
-				];
-			}
-		}
-	}
 
 	// Never return accessToken/refreshToken — both are password-equivalent
 	// credentials and must never reach the browser (plan §7.1, §5.6).
@@ -112,8 +122,10 @@ export const load: PageServerLoad = async () => {
 					lastPollStatus: null,
 					lastPollError: null
 				},
-		chargePoints,
-		chargePointsError
+		chargePoints:
+			cardState === 'connected' && integration
+				? loadChargePoints(integration)
+				: Promise.resolve({ chargePoints: [], chargePointsError: null })
 	};
 };
 
