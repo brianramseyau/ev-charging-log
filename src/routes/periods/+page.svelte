@@ -25,6 +25,30 @@
 	function formatRange(startDate: string, endDate: string) {
 		return `${startDate} – ${endDate}`;
 	}
+
+	// Advance a YYYY-MM-DD date by one calendar month, clamping to the target
+	// month's last day (e.g. Jan 31 -> Feb 28) rather than overflowing into March.
+	function addOneMonth(dateStr: string) {
+		const [y, m, d] = dateStr.split('-').map(Number);
+		let year = y;
+		let month = m + 1;
+		if (month > 12) {
+			month = 1;
+			year += 1;
+		}
+		const daysInMonth = new Date(year, month, 0).getDate();
+		const day = Math.min(d, daysInMonth);
+		return `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+	}
+
+	function openForm() {
+		if (data.periods.length > 0 && !label && !startDate && !endDate) {
+			const [last] = data.periods;
+			startDate = addOneMonth(last.startDate);
+			endDate = addOneMonth(last.endDate);
+		}
+		showForm = true;
+	}
 </script>
 
 <svelte:head>
@@ -34,7 +58,7 @@
 <h1>Billing periods</h1>
 
 <div class="toolbar">
-	<Button variant="raised" onclick={() => (showForm = !showForm)}>
+	<Button variant="raised" onclick={() => (showForm ? (showForm = false) : openForm())}>
 		<Label>{showForm ? 'Cancel' : 'Add period'}</Label>
 	</Button>
 </div>
