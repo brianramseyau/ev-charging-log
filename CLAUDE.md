@@ -70,11 +70,11 @@ Playwright is a dev dependency (Chromium only) specifically so UI changes can be
 
 ```sh
 npm run dev &
-node -e "
+LANGUAGE=en_AU:en LC_ALL=C.utf8 LANG=C.utf8 node -e "
 const { chromium } = require('playwright');
 (async () => {
-  const browser = await chromium.launch();
-  const page = await browser.newPage();
+  const browser = await chromium.launch({ args: ['--lang=en-GB'] });
+  const page = await browser.newPage({ locale: 'en-GB' });
   await page.goto('http://localhost:5173/<route>');
   await page.waitForSelector('text=<something on the page>');
   await page.screenshot({ path: '/tmp/check.png' });
@@ -84,6 +84,8 @@ const { chromium } = require('playwright');
 ```
 
 Check both light and dark mode by passing `colorScheme: 'light' | 'dark'` to `browser.newPage()` / `browser.newContext()` — this app is dark-theme-first and several past bugs (e.g. native date/time picker icons) only showed up in one mode.
+
+This app targets an Australian (day-first) user, so native `<input type="date">`/`<input type="time">` fields must be screenshotted with a day-first locale, not left at Playwright's default `en-US`. That default renders `MM/DD/YYYY` and is easy to mistake for an app bug when it's actually just the browser's own language setting — a page can't override this via its `lang` attribute or `Intl`/`document.documentElement.lang`; only the browser's own UI language controls it. No `en-AU` locale pack ships in the sandboxed Chromium build this environment uses (`ls $(dirname $(node -e "console.log(require('playwright').chromium.executablePath())"))/locales | grep ^en` to check what's available), so the recipe above substitutes `en-GB` (same day-first `DD/MM/YYYY` convention) — set via **both** the `LANGUAGE` env var (Chromium reads this for its locale pak on Linux; the sandboxed OS has no locale data installed beyond `C`/`C.utf8`/`POSIX`, so `LC_ALL`/`LANG` alone don't do it) and the `--lang` launch arg together — one without the other was not sufficient when this was verified.
 
 ## Privacy
 
