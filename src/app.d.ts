@@ -5,6 +5,8 @@
 declare global {
 	// Set via vite.config.ts `define`, true when building for the Electron desktop app.
 	const __ELECTRON_BUILD__: boolean;
+	// Set via vite.config.ts `define` from package.json's `version` field.
+	const __APP_VERSION__: string;
 
 	namespace App {
 		// interface Error {}
