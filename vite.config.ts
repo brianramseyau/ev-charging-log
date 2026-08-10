@@ -2,6 +2,7 @@ import { defineConfig } from 'vitest/config';
 import adapter from '@sveltejs/adapter-node';
 import { sveltekit } from '@sveltejs/kit/vite';
 import { SvelteKitPWA } from '@vite-pwa/sveltekit';
+import { version as appVersion } from './package.json' with { type: 'json' };
 
 // The PWA service worker targets a real HTTPS origin; inside a localhost-loaded
 // Electron BrowserWindow it's redundant at best and a source of stale-asset bugs
@@ -10,7 +11,8 @@ const isElectronBuild = process.env.ELECTRON_BUILD === 'true';
 
 export default defineConfig({
 	define: {
-		__ELECTRON_BUILD__: JSON.stringify(isElectronBuild)
+		__ELECTRON_BUILD__: JSON.stringify(isElectronBuild),
+		__APP_VERSION__: JSON.stringify(appVersion)
 	},
 	plugins: [
 		sveltekit({

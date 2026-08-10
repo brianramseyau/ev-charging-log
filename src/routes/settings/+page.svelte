@@ -351,6 +351,8 @@
 	</Content>
 </Card>
 
+<p class="app-version">EV Charging Log v{__APP_VERSION__}</p>
+
 <style>
 	.page-title {
 		font-size: 1.3rem;
@@ -446,6 +448,13 @@
 		color: #64748b;
 	}
 
+	.app-version {
+		text-align: center;
+		font-size: 0.75rem;
+		color: #64748b;
+		margin: 1.75rem 0 0.5rem;
+	}
+
 	@media (prefers-color-scheme: dark) {
 		.page-subtitle {
 			color: #94a3b8;
@@ -464,6 +473,10 @@
 		}
 
 		.evnex-charge-points-label {
+			color: #94a3b8;
+		}
+
+		.app-version {
 			color: #94a3b8;
 		}
 
