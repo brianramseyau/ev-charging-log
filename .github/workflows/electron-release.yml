@@ -29,11 +29,15 @@ jobs:
             echo "Release $TAG already exists, leaving it as-is."
             exit 0
           fi
-          NOTES="$(git tag -l --format='%(contents)' "$TAG")"
+          TITLE="$(git tag -l --format='%(contents:subject)' "$TAG")"
+          NOTES="$(git tag -l --format='%(contents:body)' "$TAG")"
+          if [ -z "$TITLE" ]; then
+            TITLE="$TAG"
+          fi
           if [ -z "$NOTES" ]; then
             NOTES="Release $TAG"
           fi
-          gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --title "$TAG" --notes "$NOTES" --target "$GITHUB_SHA"
+          gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --title "$TITLE" --notes "$NOTES" --target "$GITHUB_SHA"
 
   release:
     needs: prepare-release
