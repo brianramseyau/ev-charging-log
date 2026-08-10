@@ -10,6 +10,10 @@ import {
 	signIn as evnexSignIn
 } from '$lib/server/evnex-auth';
 import { fetchChargePoints, fetchOrgId, type EvnexChargePointInfo } from '$lib/server/evnex-client';
+import {
+	clearCachedChargePoints,
+	setCachedChargePoints
+} from '$lib/server/evnex-charge-points-cache';
 
 type EvnexIntegrationRow = typeof evnexIntegration.$inferSelect;
 
@@ -161,6 +165,10 @@ export const actions: Actions = {
 			const orgId = await fetchOrgId(tokenSet.accessToken);
 			await db.update(evnexIntegration).set({ orgId }).where(eqId(integrationRow.id));
 			chargePoints = await fetchChargePoints(tokenSet.accessToken, orgId);
+			// Populate the cache /settings/charge-points reads from, so the browser's
+			// own fetch right after this action lands (once cardState flips to
+			// 'connected') replays this result instead of hitting Evnex again.
+			setCachedChargePoints({ chargePoints, chargePointsError: null });
 		} catch (err) {
 			// Sign-in itself succeeded and is already persisted above; the charge-point
 			// list can be retried by the browser's own fetch to
@@ -236,6 +244,10 @@ export const actions: Actions = {
 				lastPollError: null
 			})
 			.where(eqId(existing.id));
+
+		// So a later reconnect (possibly a different Evnex account) doesn't briefly
+		// show the previous account's cached charge points.
+		clearCachedChargePoints();
 
 		return { disconnected: true };
 	}

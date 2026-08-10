@@ -10,6 +10,11 @@ import {
 	type EvnexChargePointInfo
 } from '$lib/server/evnex-client';
 import { EvnexNetworkError as EvnexAuthNetworkError } from '$lib/server/evnex-auth';
+import {
+	clearCachedChargePoints,
+	getCachedChargePoints,
+	setCachedChargePoints
+} from '$lib/server/evnex-charge-points-cache';
 import { ensureAccessToken } from '$lib/server/evnex-token';
 import type { RequestHandler } from './$types';
 
@@ -17,10 +22,23 @@ import type { RequestHandler } from './$types';
 // +page.svelte), rather than from /settings' own `load` — this hits the Evnex API
 // (token refresh + org lookup + charge-point list), and awaiting it in `load` used
 // to block the whole page behind a flaky, unofficial third-party API.
-export const GET: RequestHandler = async () => {
+//
+// Backed by an in-memory cache (evnex-charge-points-cache.ts) so that only the
+// first request of the process's lifetime — or an explicit `?refresh=true` from
+// the Refresh button in +page.svelte — actually calls the Evnex API. Every other
+// page load/remount just replays the cached result.
+export const GET: RequestHandler = async ({ url }) => {
+	const forceRefresh = url.searchParams.get('refresh') === 'true';
+
 	const [integration] = await db.select().from(evnexIntegration).limit(1);
 	if (!integration || integration.refreshToken == null) {
+		clearCachedChargePoints();
 		return json({ chargePoints: [], chargePointsError: null });
+	}
+
+	if (!forceRefresh) {
+		const cached = getCachedChargePoints();
+		if (cached) return json(cached);
 	}
 
 	try {
@@ -34,7 +52,9 @@ export const GET: RequestHandler = async () => {
 				.where(eq(evnexIntegration.id, integration.id));
 		}
 		const chargePoints: EvnexChargePointInfo[] = await fetchChargePoints(accessToken, orgId);
-		return json({ chargePoints, chargePointsError: null });
+		const result = { chargePoints, chargePointsError: null };
+		setCachedChargePoints(result);
+		return json(result);
 	} catch (err) {
 		// Never let a flaky Evnex API error the whole /settings page — fall back to
 		// showing just the already-selected charger (if any) and a note. Surface the

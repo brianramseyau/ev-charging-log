@@ -6,6 +6,8 @@
 	import Switch from '@smui/switch';
 	import FormField from '@smui/form-field';
 	import Button, { Label } from '@smui/button';
+	import { mdiRefresh } from '@mdi/js';
+	import Icon from '$lib/components/Icon.svelte';
 	import AddressField from '$lib/components/AddressField.svelte';
 	import type { PageData, ActionData } from './$types';
 
@@ -48,6 +50,8 @@
 	let chargePoints = $state<ChargePoint[]>([]);
 	let chargePointsError = $state<string | null>(null);
 	let chargePointsLoading = $state(false);
+	let chargePointsRefreshing = $state(false);
+	let chargePointsLoaded = $state(false);
 
 	const selectedChargePoint = $derived(
 		chargePoints.find((p) => p.id === selectedChargePointId) ?? null
@@ -57,16 +61,18 @@
 	// used to be fetched in /settings' own `load`, blocking page render behind a
 	// flaky, unofficial third-party API — fetch it here instead, after the rest of
 	// the page has already mounted, so /settings never waits on Evnex.
-	$effect(() => {
-		if (data.evnex.cardState !== 'connected') {
-			chargePoints = [];
-			chargePointsError = null;
-			return;
+	//
+	// /settings/charge-points caches its result server-side (in-memory), so calling
+	// this without `force` on every mount is cheap — only the process's first
+	// request (or an explicit Refresh click) actually reaches Evnex.
+	function loadChargePoints(force: boolean) {
+		if (force) {
+			chargePointsRefreshing = true;
+		} else {
+			chargePointsLoading = true;
 		}
-
-		chargePointsLoading = true;
 		chargePointsError = null;
-		fetch('/settings/charge-points')
+		fetch(force ? '/settings/charge-points?refresh=true' : '/settings/charge-points')
 			.then((res) => res.json())
 			.then((result: { chargePoints: ChargePoint[]; chargePointsError: string | null }) => {
 				chargePoints = result.chargePoints;
@@ -77,7 +83,21 @@
 			})
 			.finally(() => {
 				chargePointsLoading = false;
+				chargePointsRefreshing = false;
+				chargePointsLoaded = true;
 			});
+	}
+
+	$effect(() => {
+		if (data.evnex.cardState !== 'connected') {
+			chargePoints = [];
+			chargePointsError = null;
+			chargePointsLoaded = false;
+			return;
+		}
+
+		if (chargePointsLoaded) return;
+		loadChargePoints(false);
 	});
 
 	function formatLastPolled(iso: string | null) {
@@ -240,6 +260,14 @@
 				{#if chargePointsError}
 					<p class="evnex-warning">{chargePointsError}</p>
 				{/if}
+
+				<div class="evnex-charge-points-header">
+					<span class="evnex-charge-points-label">Charge points</span>
+					<Button onclick={() => loadChargePoints(true)} disabled={chargePointsRefreshing}>
+						<Icon path={mdiRefresh} size={18} />
+						<Label>{chargePointsRefreshing ? 'Refreshing…' : 'Refresh'}</Label>
+					</Button>
+				</div>
 
 				<form
 					method="POST"
@@ -405,6 +433,19 @@
 		margin: 0;
 	}
 
+	.evnex-charge-points-header {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 0.75rem;
+		margin-bottom: -0.25rem;
+	}
+
+	.evnex-charge-points-label {
+		font-size: 0.85rem;
+		color: #64748b;
+	}
+
 	@media (prefers-color-scheme: dark) {
 		.page-subtitle {
 			color: #94a3b8;
@@ -419,6 +460,10 @@
 		}
 
 		.evnex-loading {
+			color: #94a3b8;
+		}
+
+		.evnex-charge-points-label {
 			color: #94a3b8;
 		}
 
