@@ -39,6 +39,47 @@
 		evnexEnabled = data.evnex.enabled;
 	});
 
+	interface ChargePoint {
+		id: string;
+		name: string;
+		timeZone: string;
+	}
+
+	let chargePoints = $state<ChargePoint[]>([]);
+	let chargePointsError = $state<string | null>(null);
+	let chargePointsLoading = $state(false);
+
+	const selectedChargePoint = $derived(
+		chargePoints.find((p) => p.id === selectedChargePointId) ?? null
+	);
+
+	// The charge-point list hits the Evnex API (token refresh + org lookup + list) and
+	// used to be fetched in /settings' own `load`, blocking page render behind a
+	// flaky, unofficial third-party API — fetch it here instead, after the rest of
+	// the page has already mounted, so /settings never waits on Evnex.
+	$effect(() => {
+		if (data.evnex.cardState !== 'connected') {
+			chargePoints = [];
+			chargePointsError = null;
+			return;
+		}
+
+		chargePointsLoading = true;
+		chargePointsError = null;
+		fetch('/settings/charge-points')
+			.then((res) => res.json())
+			.then((result: { chargePoints: ChargePoint[]; chargePointsError: string | null }) => {
+				chargePoints = result.chargePoints;
+				chargePointsError = result.chargePointsError;
+			})
+			.catch(() => {
+				chargePointsError = 'Something went wrong listing charge points.';
+			})
+			.finally(() => {
+				chargePointsLoading = false;
+			});
+	});
+
 	function formatLastPolled(iso: string | null) {
 		if (!iso) return 'never polled';
 		const then = new Date(iso).getTime();
@@ -193,12 +234,9 @@
 				{/if}
 			{/if}
 
-			{#await data.chargePoints}
+			{#if chargePointsLoading}
 				<p class="evnex-loading">Loading charge points…</p>
-			{:then { chargePoints, chargePointsError }}
-				{@const selectedChargePoint =
-					chargePoints.find((p) => p.id === selectedChargePointId) ?? null}
-
+			{:else}
 				{#if chargePointsError}
 					<p class="evnex-warning">{chargePointsError}</p>
 				{/if}
@@ -269,7 +307,7 @@
 						<p class="settings-form__error">{form.saveError}</p>
 					{/if}
 				</form>
-			{/await}
+			{/if}
 		{/if}
 	</Content>
 </Card>
