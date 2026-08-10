@@ -13,12 +13,48 @@
 	let label = $state('');
 	let startDate = $state('');
 	let endDate = $state('');
+	// Tracks the last value we auto-filled into `label`, so we only keep
+	// overwriting it while the user hasn't typed a label of their own.
+	let autoLabel = $state('');
+
+	const MONTH_NAMES = [
+		'January',
+		'February',
+		'March',
+		'April',
+		'May',
+		'June',
+		'July',
+		'August',
+		'September',
+		'October',
+		'November',
+		'December'
+	];
+
+	// Formats a YYYY-MM-DD date as "{Month} {Year}" (e.g. "August 2026"),
+	// parsed from the string components directly to avoid `new Date(...)`
+	// UTC-parsing shifting the date in non-UTC timezones.
+	function defaultLabelFor(dateStr: string) {
+		const [y, m] = dateStr.split('-').map(Number);
+		if (!y || !m || m < 1 || m > 12) return '';
+		return `${MONTH_NAMES[m - 1]} ${y}`;
+	}
 
 	$effect(() => {
 		if (form) {
 			label = form.label ?? '';
 			startDate = form.startDate ?? '';
 			endDate = form.endDate ?? '';
+			autoLabel = '';
+		}
+	});
+
+	$effect(() => {
+		if (label === autoLabel) {
+			const next = defaultLabelFor(startDate);
+			label = next;
+			autoLabel = next;
 		}
 	});
 
@@ -76,6 +112,7 @@
 						label = '';
 						startDate = '';
 						endDate = '';
+						autoLabel = '';
 					}
 				};
 			}}
