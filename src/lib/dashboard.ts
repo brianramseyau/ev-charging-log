@@ -22,6 +22,7 @@ export interface DashboardPeriod {
 	label: string;
 	startDate: string;
 	endDate: string;
+	submittedAt: string | null;
 }
 
 export interface EfficiencyPoint {
@@ -132,12 +133,11 @@ export interface DashboardKpis {
 	avgKwhPer100Km: number | null;
 	avgCostPerKwh: number | null;
 	avgCostPerKm: number | null;
-	currentPeriod: { label: string; homePct: number | null } | null;
 }
 
+/** Lifetime figures cover every session ever logged, including whatever is in the current period so far. */
 export function computeKpis(
 	sessions: DashboardSession[],
-	periods: DashboardPeriod[],
 	efficiencySeries: EfficiencyPoint[]
 ): DashboardKpis {
 	let lifetimeHomeKwh = 0;
@@ -161,23 +161,95 @@ export function computeKpis(
 			? avgCostPerKwh / avgEfficiency
 			: null;
 
-	const mostRecent = [...periods].sort((a, b) =>
-		a.endDate < b.endDate ? 1 : a.endDate > b.endDate ? -1 : 0
-	)[0];
-
-	let currentPeriod: DashboardKpis['currentPeriod'] = null;
-	if (mostRecent) {
-		const [split] = computePeriodSplits([mostRecent], sessions);
-		currentPeriod = { label: split.label, homePct: split.homePct };
-	}
-
 	return {
 		lifetimeHomeKwh,
 		lifetimeCost,
 		avgEfficiency,
 		avgKwhPer100Km,
 		avgCostPerKwh,
-		avgCostPerKm,
-		currentPeriod
+		avgCostPerKm
+	};
+}
+
+/**
+ * The period actively being logged against: the not-yet-submitted period with
+ * the latest start date, or null once every period has been submitted (or
+ * none exist yet). It's still accumulating sessions, so the historical charts
+ * and comparisons below exclude it — a partial period next to complete ones
+ * would misleadingly look like a drop in usage/cost.
+ */
+export function findCurrentPeriod(periods: DashboardPeriod[]): DashboardPeriod | null {
+	const unsubmitted = periods.filter((p) => p.submittedAt == null);
+	if (unsubmitted.length === 0) return null;
+	return [...unsubmitted].sort((a, b) =>
+		a.startDate < b.startDate ? 1 : a.startDate > b.startDate ? -1 : 0
+	)[0];
+}
+
+export interface CurrentPeriodStats {
+	label: string;
+	startDate: string;
+	endDate: string;
+	homeKwh: number;
+	publicKwh: number;
+	homeCost: number;
+	homePct: number | null;
+	avgEfficiency: number | null;
+	avgKwhPer100Km: number | null;
+}
+
+/**
+ * Stats for just the current (unsubmitted) period, shown at the top of the
+ * dashboard separately from the historical charts below. `efficiencySeries`
+ * should be the full, unfiltered series so this can pick out the current
+ * period's own points by session id.
+ */
+export function computeCurrentPeriodStats(
+	currentPeriod: DashboardPeriod | null,
+	sessions: DashboardSession[],
+	efficiencySeries: EfficiencyPoint[]
+): CurrentPeriodStats | null {
+	if (!currentPeriod) return null;
+
+	const [split] = computePeriodSplits([currentPeriod], sessions);
+	const periodSessionIds = new Set(
+		sessions.filter((s) => s.billingPeriodId === currentPeriod.id).map((s) => s.id)
+	);
+	const periodEfficiency = efficiencySeries.filter((p) => periodSessionIds.has(p.sessionId));
+	const avgEfficiency =
+		periodEfficiency.length > 0
+			? periodEfficiency.reduce((sum, p) => sum + p.kmPerKwh, 0) / periodEfficiency.length
+			: null;
+	const avgKwhPer100Km = avgEfficiency != null && avgEfficiency > 0 ? 100 / avgEfficiency : null;
+
+	return {
+		label: split.label,
+		startDate: currentPeriod.startDate,
+		endDate: currentPeriod.endDate,
+		homeKwh: split.homeKwh,
+		publicKwh: split.publicKwh,
+		homeCost: split.homeCost,
+		homePct: split.homePct,
+		avgEfficiency,
+		avgKwhPer100Km
+	};
+}
+
+/**
+ * Splits periods/sessions into the current (unsubmitted) period and
+ * everything else, for feeding the historical charts (which should never
+ * plot the still-in-progress period alongside complete ones).
+ */
+export function excludeCurrentPeriod(
+	periods: DashboardPeriod[],
+	sessions: DashboardSession[],
+	currentPeriod: DashboardPeriod | null
+): { historicalPeriods: DashboardPeriod[]; historicalSessions: DashboardSession[] } {
+	if (!currentPeriod) {
+		return { historicalPeriods: periods, historicalSessions: sessions };
+	}
+	return {
+		historicalPeriods: periods.filter((p) => p.id !== currentPeriod.id),
+		historicalSessions: sessions.filter((s) => s.billingPeriodId !== currentPeriod.id)
 	};
 }
