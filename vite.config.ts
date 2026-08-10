@@ -2,12 +2,18 @@ import { defineConfig } from 'vitest/config';
 import adapter from '@sveltejs/adapter-node';
 import { sveltekit } from '@sveltejs/kit/vite';
 import { SvelteKitPWA } from '@vite-pwa/sveltekit';
-import { version as appVersion } from './package.json' with { type: 'json' };
+import { version as pkgVersion } from './package.json' with { type: 'json' };
 
 // The PWA service worker targets a real HTTPS origin; inside a localhost-loaded
 // Electron BrowserWindow it's redundant at best and a source of stale-asset bugs
 // at worst, so skip it for Electron builds (see PLAN.md §11.2).
 const isElectronBuild = process.env.ELECTRON_BUILD === 'true';
+
+// package.json's version only bumps for tagged releases (see .github/workflows/docker-publish.yml
+// and electron-release.yml, both `v*`-tag-triggered). Untagged CI builds off `main` set APP_VERSION
+// to `dev-<short sha>` instead, so the Settings page doesn't show a stale release version for a
+// build that's actually ahead of it.
+const appVersion = process.env.APP_VERSION || pkgVersion;
 
 export default defineConfig({
 	define: {

@@ -44,6 +44,18 @@ jobs:
             type=semver,pattern={{major}},prefix=v
             type=sha
 
+      # Untagged builds (pushes to `main`) don't bump package.json's version, so the
+      # in-app version display would otherwise show a stale release number. Tagged
+      # releases leave this empty and fall back to package.json's version instead.
+      - name: Compute app version
+        id: app-version
+        run: |
+          if [[ "${{ github.ref_type }}" == "tag" ]]; then
+            echo "value=" >> "$GITHUB_OUTPUT"
+          else
+            echo "value=dev-$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Build and push image
         uses: docker/build-push-action@v6
         with:
@@ -51,5 +63,7 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            APP_VERSION=${{ steps.app-version.outputs.value }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
