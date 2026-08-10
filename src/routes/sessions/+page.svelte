@@ -54,6 +54,7 @@
 	let submitting = $state(false);
 	let completingId = $state<number | null>(null);
 	let polling = $state(false);
+	let showForm = $state(false);
 
 	const pollSummary = $derived(form?.pollSummary ?? null);
 	const pollError = $derived(form?.pollError ?? null);
@@ -131,152 +132,10 @@
 	<p class="field-error page-error">{form.error}</p>
 {/if}
 
-<Card class="session-form-card" padded>
-	<Content>
-		<h2 class="section-title">Log a session</h2>
-
-		<form
-			method="POST"
-			action="?/create"
-			use:enhance={() => {
-				submitting = true;
-				return async ({ result, update }) => {
-					submitting = false;
-					if (result.type === 'success') {
-						resetForm();
-					}
-					await update({ reset: false });
-				};
-			}}
-		>
-			<div class="field-group">
-				<span class="field-label">Kind</span>
-				<div class="kind-toggle" role="radiogroup" aria-label="Charging kind">
-					<label class:selected={kind === 'home'} class="kind-toggle__home">
-						<input type="radio" name="kind" value="home" bind:group={kind} />
-						<Icon path={mdiHome} size={18} />
-						Home
-					</label>
-					<label class:selected={kind === 'public'} class="kind-toggle__public">
-						<input type="radio" name="kind" value="public" bind:group={kind} />
-						<Icon path={mdiEvStation} size={18} />
-						Public
-					</label>
-				</div>
-				{#if errors.kind}<p class="field-error">{errors.kind}</p>{/if}
-			</div>
-
-			<div class="field-row">
-				<DateTimeField
-					type="date"
-					label="Date"
-					name="date"
-					bind:value={date}
-					required
-					error={errors.date}
-				/>
-			</div>
-
-			<div class="field-row">
-				<DateTimeField
-					type="time"
-					label="Time"
-					name="time"
-					bind:value={time}
-					required
-					error={errors.time}
-				/>
-			</div>
-
-			<div class="field-row">
-				<Textfield
-					variant="outlined"
-					type="number"
-					label="Odometer (km)"
-					bind:value={odometerKm}
-					input$name="odometerKm"
-					input$step="0.1"
-					input$min="0"
-					required
-					style="width: 100%"
-					invalid={!!errors.odometerKm}
-				/>
-				{#if errors.odometerKm}<p class="field-error">{errors.odometerKm}</p>{/if}
-			</div>
-
-			<div class="field-row">
-				<Textfield
-					variant="outlined"
-					type="number"
-					label="kWh used (optional)"
-					bind:value={kwhUsed}
-					input$name="kwhUsed"
-					input$step="0.001"
-					input$min="0"
-					style="width: 100%"
-					invalid={!!errors.kwhUsed}
-				/>
-				{#if errors.kwhUsed}
-					<p class="field-error">{errors.kwhUsed}</p>
-				{:else}
-					<p class="field-hint">
-						Leave blank to save as a draft — you can fill this in once charging finishes.
-					</p>
-				{/if}
-			</div>
-
-			<div class="field-row">
-				<AddressField
-					label="Location"
-					bind:value={location}
-					name="location"
-					required
-					invalid={!!errors.location}
-				/>
-				{#if errors.location}<p class="field-error">{errors.location}</p>{/if}
-			</div>
-
-			<div class="field-row">
-				<Textfield
-					variant="outlined"
-					textarea
-					label="Notes (optional)"
-					bind:value={notes}
-					input$name="notes"
-					style="width: 100%"
-				/>
-			</div>
-
-			<Button variant="raised" type="submit" disabled={submitting} style="width: 100%">
-				<Label>{submitting ? 'Saving…' : willBeDraft ? 'Save draft' : 'Save session'}</Label>
-			</Button>
-
-			{#if form?.success}
-				<div class="save-feedback">
-					<p class="save-feedback__ok">
-						{form.isDraft ? 'Draft saved — add kWh once charging finishes.' : 'Session saved.'}
-					</p>
-					{#if form.odometerWarning}
-						<p class="save-feedback__warning">
-							Warning: this odometer reading is lower than the last recorded reading.
-						</p>
-					{/if}
-					{#if form.unassigned}
-						<p class="save-feedback__note">Not yet assigned to a billing period.</p>
-					{/if}
-					{#if form.noRatePlan}
-						<p class="save-feedback__warning">
-							No rate plan covers this date yet — cost was left unset. Add one on the Rates page.
-						</p>
-					{/if}
-				</div>
-			{/if}
-		</form>
-	</Content>
-</Card>
-
-<div class="history-header">
-	<h2 class="section-title">History</h2>
+<div class="toolbar">
+	<Button variant="raised" onclick={() => (showForm = !showForm)}>
+		<Label>{showForm ? 'Cancel' : 'Add Charge'}</Label>
+	</Button>
 	<form
 		method="POST"
 		action="?/pollEvnex"
@@ -289,13 +148,13 @@
 		}}
 	>
 		<Button
-			variant="outlined"
+			variant="raised"
 			type="submit"
 			disabled={!data.evnexReady || polling}
 			title={data.evnexReady ? undefined : 'Configure the Evnex integration in Settings first'}
 		>
 			<Icon path={mdiCloudDownloadOutline} size={18} />
-			<Label>{polling ? 'Pulling…' : 'Pull from charger'}</Label>
+			<Label>{polling ? 'Pulling…' : 'Import Charge'}</Label>
 		</Button>
 	</form>
 </div>
@@ -327,6 +186,155 @@
 {#if pollError}
 	<p class="field-error">{pollError}</p>
 {/if}
+
+{#if showForm}
+	<Card class="session-form-card" padded>
+		<Content>
+			<h2 class="section-title">Log a session</h2>
+
+			<form
+				method="POST"
+				action="?/create"
+				use:enhance={() => {
+					submitting = true;
+					return async ({ result, update }) => {
+						submitting = false;
+						if (result.type === 'success') {
+							resetForm();
+							showForm = false;
+						}
+						await update({ reset: false });
+					};
+				}}
+			>
+				<div class="field-group">
+					<span class="field-label">Kind</span>
+					<div class="kind-toggle" role="radiogroup" aria-label="Charging kind">
+						<label class:selected={kind === 'home'} class="kind-toggle__home">
+							<input type="radio" name="kind" value="home" bind:group={kind} />
+							<Icon path={mdiHome} size={18} />
+							Home
+						</label>
+						<label class:selected={kind === 'public'} class="kind-toggle__public">
+							<input type="radio" name="kind" value="public" bind:group={kind} />
+							<Icon path={mdiEvStation} size={18} />
+							Public
+						</label>
+					</div>
+					{#if errors.kind}<p class="field-error">{errors.kind}</p>{/if}
+				</div>
+
+				<div class="field-row">
+					<DateTimeField
+						type="date"
+						label="Date"
+						name="date"
+						bind:value={date}
+						required
+						error={errors.date}
+					/>
+				</div>
+
+				<div class="field-row">
+					<DateTimeField
+						type="time"
+						label="Time"
+						name="time"
+						bind:value={time}
+						required
+						error={errors.time}
+					/>
+				</div>
+
+				<div class="field-row">
+					<Textfield
+						variant="outlined"
+						type="number"
+						label="Odometer (km)"
+						bind:value={odometerKm}
+						input$name="odometerKm"
+						input$step="0.1"
+						input$min="0"
+						required
+						style="width: 100%"
+						invalid={!!errors.odometerKm}
+					/>
+					{#if errors.odometerKm}<p class="field-error">{errors.odometerKm}</p>{/if}
+				</div>
+
+				<div class="field-row">
+					<Textfield
+						variant="outlined"
+						type="number"
+						label="kWh used (optional)"
+						bind:value={kwhUsed}
+						input$name="kwhUsed"
+						input$step="0.001"
+						input$min="0"
+						style="width: 100%"
+						invalid={!!errors.kwhUsed}
+					/>
+					{#if errors.kwhUsed}
+						<p class="field-error">{errors.kwhUsed}</p>
+					{:else}
+						<p class="field-hint">
+							Leave blank to save as a draft — you can fill this in once charging finishes.
+						</p>
+					{/if}
+				</div>
+
+				<div class="field-row">
+					<AddressField
+						label="Location"
+						bind:value={location}
+						name="location"
+						required
+						invalid={!!errors.location}
+					/>
+					{#if errors.location}<p class="field-error">{errors.location}</p>{/if}
+				</div>
+
+				<div class="field-row">
+					<Textfield
+						variant="outlined"
+						textarea
+						label="Notes (optional)"
+						bind:value={notes}
+						input$name="notes"
+						style="width: 100%"
+					/>
+				</div>
+
+				<Button variant="raised" type="submit" disabled={submitting} style="width: 100%">
+					<Label>{submitting ? 'Saving…' : willBeDraft ? 'Save draft' : 'Save session'}</Label>
+				</Button>
+
+				{#if form?.success}
+					<div class="save-feedback">
+						<p class="save-feedback__ok">
+							{form.isDraft ? 'Draft saved — add kWh once charging finishes.' : 'Session saved.'}
+						</p>
+						{#if form.odometerWarning}
+							<p class="save-feedback__warning">
+								Warning: this odometer reading is lower than the last recorded reading.
+							</p>
+						{/if}
+						{#if form.unassigned}
+							<p class="save-feedback__note">Not yet assigned to a billing period.</p>
+						{/if}
+						{#if form.noRatePlan}
+							<p class="save-feedback__warning">
+								No rate plan covers this date yet — cost was left unset. Add one on the Rates page.
+							</p>
+						{/if}
+					</div>
+				{/if}
+			</form>
+		</Content>
+	</Card>
+{/if}
+
+<h2 class="section-title">History</h2>
 
 {#if data.sessions.length === 0}
 	<p class="empty-state">No sessions logged yet.</p>
@@ -468,20 +476,16 @@
 		margin: 1.5rem 0 0.75rem;
 	}
 
-	.history-header {
+	.toolbar {
 		display: flex;
 		align-items: center;
-		justify-content: space-between;
 		gap: 0.75rem;
 		flex-wrap: wrap;
+		margin-bottom: 1rem;
 	}
 
-	.history-header .section-title {
-		margin: 1.5rem 0 0;
-	}
-
-	.history-header form {
-		margin: 1.5rem 0 0;
+	.toolbar form {
+		margin: 0;
 	}
 
 	:global(.session-form-card) {
