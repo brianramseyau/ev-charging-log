@@ -13,6 +13,11 @@ RUN npm ci
 # it needs *some* writable DATABASE_URL even though this throwaway build-time
 # database is discarded — the real one is set for the runtime stage below.
 ENV DATABASE_URL=/tmp/build-time.db
+# Set by docker-publish.yml to `dev-<short sha>` for untagged builds off `main`, so
+# the Settings page doesn't show a stale package.json version (see vite.config.ts).
+# Left empty for tagged-release builds, which fall back to package.json's version there.
+ARG APP_VERSION=
+ENV APP_VERSION=$APP_VERSION
 RUN npm run build
 
 # ---- production dependencies (separate from build, so devDependencies never ship) ----
