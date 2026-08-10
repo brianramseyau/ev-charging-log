@@ -9,14 +9,7 @@ import {
 	EvnexSignInError,
 	signIn as evnexSignIn
 } from '$lib/server/evnex-auth';
-import {
-	EvnexApiError,
-	EvnexNetworkError as EvnexClientNetworkError,
-	fetchChargePoints,
-	fetchOrgId,
-	type EvnexChargePointInfo
-} from '$lib/server/evnex-client';
-import { ensureAccessToken } from '$lib/server/evnex-token';
+import { fetchChargePoints, fetchOrgId, type EvnexChargePointInfo } from '$lib/server/evnex-client';
 
 type EvnexIntegrationRow = typeof evnexIntegration.$inferSelect;
 
@@ -29,55 +22,11 @@ function eqId(id: number) {
 	return eq(evnexIntegration.id, id);
 }
 
-type ChargePointsResult = {
-	chargePoints: EvnexChargePointInfo[];
-	chargePointsError: string | null;
-};
-
-// Hits the Evnex API (token refresh + org lookup + charge-point list), so it's kept
-// as its own promise-returning function and deliberately *not* awaited in `load` —
-// SvelteKit streams a non-top-level-awaited promise to the browser instead of
-// blocking the whole page behind a flaky third-party API (plan §... Evnex is
-// unofficial/undocumented, see evnex-client.ts's module doc comment).
-async function loadChargePoints(integration: EvnexIntegrationRow): Promise<ChargePointsResult> {
-	try {
-		const accessToken = await ensureAccessToken(integration);
-		let orgId = integration.orgId;
-		if (orgId == null) {
-			orgId = await fetchOrgId(accessToken);
-			await db.update(evnexIntegration).set({ orgId }).where(eqId(integration.id));
-		}
-		const chargePoints = await fetchChargePoints(accessToken, orgId);
-		return { chargePoints, chargePointsError: null };
-	} catch (err) {
-		// Never let a flaky Evnex API error the whole /settings page — fall back to
-		// showing just the already-selected charger (if any) and a note. The
-		// Reconnect state (auth_failed) is handled separately, in `load`. Surface the
-		// real error (status + correlation id, never a raw token) rather than a
-		// generic string, and log it server-side too — this endpoint contract is
-		// unverified against a live account (see evnex-client.ts's module doc
-		// comment), so a specific message here is the only way to diagnose it.
-		console.error('[evnex] /settings charge-point list failed:', err);
-		const chargePointsError =
-			err instanceof EvnexApiError
-				? `Could not list charge points: ${err.message}${err.correlationId ? ` (ref: ${err.correlationId})` : ''}`
-				: err instanceof EvnexClientNetworkError || err instanceof EvnexAuthNetworkError
-					? `Could not reach Evnex to list charge points: ${err.message}`
-					: `Something went wrong listing charge points: ${err instanceof Error ? err.message : String(err)}`;
-		const chargePoints =
-			integration.chargePointId && integration.chargePointName
-				? [
-						{
-							id: integration.chargePointId,
-							name: integration.chargePointName,
-							timeZone: integration.chargePointTimeZone ?? ''
-						}
-					]
-				: [];
-		return { chargePoints, chargePointsError };
-	}
-}
-
+// Deliberately does *not* fetch the Evnex charge-point list — that hits the Evnex
+// API (token refresh + org lookup + charge-point list) and used to be awaited here,
+// blocking the whole page behind a flaky, unofficial third-party API. The page now
+// renders with only local DB reads, and the browser fetches
+// `/settings/charge-points` itself once the page has mounted (see +page.svelte).
 export const load: PageServerLoad = async () => {
 	const [settingsRow, integration] = await Promise.all([
 		db
@@ -121,11 +70,7 @@ export const load: PageServerLoad = async () => {
 					lastPolledAt: null,
 					lastPollStatus: null,
 					lastPollError: null
-				},
-		chargePoints:
-			cardState === 'connected' && integration
-				? loadChargePoints(integration)
-				: Promise.resolve({ chargePoints: [], chargePointsError: null })
+				}
 	};
 };
 
@@ -218,9 +163,10 @@ export const actions: Actions = {
 			chargePoints = await fetchChargePoints(tokenSet.accessToken, orgId);
 		} catch (err) {
 			// Sign-in itself succeeded and is already persisted above; the charge-point
-			// list can be retried on the next page load (`load` does the same fetch).
-			// Surface the real error rather than a generic string — see the matching
-			// comment in `load`'s catch block for why.
+			// list can be retried by the browser's own fetch to
+			// /settings/charge-points once the page re-renders connected. Surface the
+			// real error rather than a generic string — see the matching comment in
+			// that endpoint's catch block for why.
 			console.error('[evnex] connectEvnex charge-point list failed:', err);
 			const detail = err instanceof Error ? err.message : String(err);
 			return {

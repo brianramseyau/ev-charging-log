@@ -42,7 +42,8 @@ Requires `DATABASE_URL` in `.env` (copy from `.env.example`) — path to the SQL
 - `src/lib/server/*.ts` (`sessions.ts`, `rates.ts`, `report.ts`, `import.ts`, `evnex.ts`) — pure, dependency-free calculation/parsing logic, deliberately kept free of DB imports so it's cheap to unit test. Each has a co-located `*.test.ts`.
 - `src/lib/server/evnex-auth.ts`, `evnex-client.ts` — the Evnex integration's impure edges: Cognito auth and the `fetch` calls against the Evnex API, respectively. Not unit tested (network + SDK), unlike `evnex.ts`.
 - `src/lib/server/evnex-token.ts` — a narrow, deliberate exception to the "only routes import `$lib/server/db`" rule below: shared access-token refresh/persist logic used by both `/settings` and the `/sessions` poll action, kept in one place so the terminal-refresh-failure handling can't drift between two copies.
-- `src/routes/**/+page.server.ts` — the only other place that imports `$lib/server/db` and wires the pure helpers to Drizzle queries and form actions.
+- `src/routes/**/+page.server.ts` — the other main place that imports `$lib/server/db` and wires the pure helpers to Drizzle queries and form actions.
+- `src/routes/settings/charge-points/+server.ts` — a `+server.ts` exception to the same rule, for the same reason as `evnex-token.ts`: `/settings`' `load` deliberately does _not_ fetch the Evnex charge-point list (token refresh + org lookup + charge-point list against the Evnex API), since awaiting that in `load` blocks page render behind a flaky, unofficial third-party API. The browser fetches this endpoint itself once `/settings` has already mounted.
 - `src/lib/dashboard.ts` — same pure-logic pattern, for the personal dashboard (not part of the lease report).
 
 When changing business logic (cost calculation, billing-period assignment, efficiency, import parsing), the pure function in `src/lib/server/*.ts` is almost always the right place — keep DB access in the route's `+page.server.ts`.
