@@ -8,11 +8,14 @@ on:
 jobs:
   # electron-builder's GitHub publisher creates a release itself if none
   # exists yet for the tag - but with no title/notes, just a bare stub.
-  # Create the real release (title + notes taken from the annotated tag)
-  # first, so the matrix jobs below find it already there and only need to
-  # attach build artifacts to it.
+  # Create the real release first (tag/title/notes below), so the matrix
+  # jobs find it already there and only need to attach build artifacts.
+  # The tag is always derived from package.json's version rather than
+  # github.ref, so this works the same whether the run came from a tag
+  # push or a manual workflow_dispatch (e.g. pushing a new "v*" tag can
+  # be blocked by tag-protection rules that don't apply to this job's
+  # own GITHUB_TOKEN creating the release+tag via the API).
   prepare-release:
-    if: startsWith(github.ref, 'refs/tags/')
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -24,16 +27,17 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          TAG="${GITHUB_REF_NAME}"
+          TAG="v$(node -p "require('./package.json').version")"
           if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
             echo "Release $TAG already exists, leaving it as-is."
             exit 0
           fi
-          TITLE="$(git tag -l --format='%(contents:subject)' "$TAG")"
-          NOTES="$(git tag -l --format='%(contents:body)' "$TAG")"
-          if [ -z "$TITLE" ]; then
-            TITLE="$TAG"
+          SUBTITLE="$(sed -n '1p' RELEASE_NOTES.md)"
+          TITLE="$TAG"
+          if [ -n "$SUBTITLE" ]; then
+            TITLE="$TAG - $SUBTITLE"
           fi
+          NOTES="$(tail -n +3 RELEASE_NOTES.md)"
           if [ -z "$NOTES" ]; then
             NOTES="Release $TAG"
           fi
@@ -41,9 +45,6 @@ jobs:
 
   release:
     needs: prepare-release
-    # prepare-release only runs (and can fail) on a tag push; on a manual
-    # workflow_dispatch run it's skipped, and that must not skip this job too.
-    if: always() && needs.prepare-release.result != 'failure'
     # Native module rebuilds (better-sqlite3) need to happen on the real
     # target OS, so each platform builds and publishes its own artifacts
     # rather than cross-compiling from one runner.
