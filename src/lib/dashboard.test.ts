@@ -1,11 +1,24 @@
 import { describe, expect, it } from 'vitest';
 import {
+	computeCurrentPeriodStats,
 	computeEfficiencySeries,
 	computeKpis,
 	computePeriodSplits,
+	excludeCurrentPeriod,
+	findCurrentPeriod,
 	type DashboardPeriod,
 	type DashboardSession
 } from './dashboard';
+
+function period(overrides: Partial<DashboardPeriod> & { id: number }): DashboardPeriod {
+	return {
+		label: 'July 2026',
+		startDate: '2026-07-01',
+		endDate: '2026-07-31',
+		submittedAt: null,
+		...overrides
+	};
+}
 
 function session(overrides: Partial<DashboardSession> & { id: number }): DashboardSession {
 	return {
@@ -88,8 +101,8 @@ describe('computeEfficiencySeries', () => {
 
 describe('computePeriodSplits', () => {
 	const periods: DashboardPeriod[] = [
-		{ id: 1, label: 'July 2026', startDate: '2026-07-01', endDate: '2026-07-31' },
-		{ id: 2, label: 'June 2026', startDate: '2026-06-01', endDate: '2026-06-30' }
+		period({ id: 1, label: 'July 2026', startDate: '2026-07-01', endDate: '2026-07-31' }),
+		period({ id: 2, label: 'June 2026', startDate: '2026-06-01', endDate: '2026-06-30' })
 	];
 
 	it('sums home/public kWh and home cost per period, ordered by start date', () => {
@@ -126,15 +139,14 @@ describe('computePeriodSplits', () => {
 
 describe('computeKpis', () => {
 	it('returns zeros/nulls gracefully on an empty dataset', () => {
-		const kpis = computeKpis([], [], []);
+		const kpis = computeKpis([], []);
 		expect(kpis).toEqual({
 			lifetimeHomeKwh: 0,
 			lifetimeCost: 0,
 			avgEfficiency: null,
 			avgKwhPer100Km: null,
 			avgCostPerKwh: null,
-			avgCostPerKm: null,
-			currentPeriod: null
+			avgCostPerKm: null
 		});
 	});
 
@@ -148,26 +160,108 @@ describe('computeKpis', () => {
 			{ sessionId: 1, date: '2026-01-01', kmPerKwh: 8 },
 			{ sessionId: 3, date: '2026-01-08', kmPerKwh: 12 }
 		];
-		const kpis = computeKpis(sessions, [], efficiencySeries);
+		const kpis = computeKpis(sessions, efficiencySeries);
 		expect(kpis.lifetimeHomeKwh).toBe(30);
 		expect(kpis.lifetimeCost).toBe(9);
 		expect(kpis.avgEfficiency).toBe(10);
 		expect(kpis.avgKwhPer100Km).toBe(10);
 		expect(kpis.avgCostPerKwh).toBe(0.3);
 		expect(kpis.avgCostPerKm).toBeCloseTo(0.03);
-		expect(kpis.currentPeriod).toBeNull();
+	});
+});
+
+describe('findCurrentPeriod', () => {
+	it('returns null when there are no periods', () => {
+		expect(findCurrentPeriod([])).toBeNull();
 	});
 
-	it('picks the most recent period (by end date) for the current-period % home', () => {
+	it('returns null once every period has been submitted', () => {
 		const periods: DashboardPeriod[] = [
-			{ id: 1, label: 'June 2026', startDate: '2026-06-01', endDate: '2026-06-30' },
-			{ id: 2, label: 'July 2026', startDate: '2026-07-01', endDate: '2026-07-31' }
+			period({ id: 1, startDate: '2026-06-01', submittedAt: '2026-08-01T00:00:00.000Z' }),
+			period({ id: 2, startDate: '2026-07-01', submittedAt: '2026-08-02T00:00:00.000Z' })
 		];
+		expect(findCurrentPeriod(periods)).toBeNull();
+	});
+
+	it('picks the unsubmitted period with the latest start date', () => {
+		const periods: DashboardPeriod[] = [
+			period({ id: 1, startDate: '2026-06-01', submittedAt: '2026-07-01T00:00:00.000Z' }),
+			period({ id: 2, startDate: '2026-07-01', submittedAt: null })
+		];
+		expect(findCurrentPeriod(periods)?.id).toBe(2);
+	});
+
+	it('ignores submitted periods even if they start later than the current one', () => {
+		const periods: DashboardPeriod[] = [
+			period({ id: 1, startDate: '2026-07-01', submittedAt: null }),
+			period({ id: 2, startDate: '2026-08-01', submittedAt: '2026-08-15T00:00:00.000Z' })
+		];
+		expect(findCurrentPeriod(periods)?.id).toBe(1);
+	});
+});
+
+describe('excludeCurrentPeriod', () => {
+	const periods: DashboardPeriod[] = [
+		period({ id: 1, label: 'June 2026', submittedAt: '2026-07-01T00:00:00.000Z' }),
+		period({ id: 2, label: 'July 2026', submittedAt: null })
+	];
+	const sessions: DashboardSession[] = [
+		session({ id: 1, billingPeriodId: 1 }),
+		session({ id: 2, billingPeriodId: 2 })
+	];
+
+	it('drops the current period and its sessions', () => {
+		const current = findCurrentPeriod(periods);
+		const { historicalPeriods, historicalSessions } = excludeCurrentPeriod(
+			periods,
+			sessions,
+			current
+		);
+		expect(historicalPeriods.map((p) => p.id)).toEqual([1]);
+		expect(historicalSessions.map((s) => s.id)).toEqual([1]);
+	});
+
+	it('returns everything unchanged when there is no current period', () => {
+		const { historicalPeriods, historicalSessions } = excludeCurrentPeriod(periods, sessions, null);
+		expect(historicalPeriods).toEqual(periods);
+		expect(historicalSessions).toEqual(sessions);
+	});
+});
+
+describe('computeCurrentPeriodStats', () => {
+	it('returns null when there is no current period', () => {
+		expect(computeCurrentPeriodStats(null, [], [])).toBeNull();
+	});
+
+	it('summarizes home/public kWh, cost, and % home for just the current period', () => {
+		const current = period({ id: 2, label: 'July 2026' });
 		const sessions: DashboardSession[] = [
-			session({ id: 1, billingPeriodId: 2, kind: 'home', kwhUsed: 30 }),
-			session({ id: 2, billingPeriodId: 2, kind: 'public', kwhUsed: 10 })
+			session({ id: 1, billingPeriodId: 2, kind: 'home', kwhUsed: 30, cost: 9 }),
+			session({ id: 2, billingPeriodId: 2, kind: 'public', kwhUsed: 10, cost: null }),
+			session({ id: 3, billingPeriodId: 1, kind: 'home', kwhUsed: 999, cost: 999 }) // other period, ignored
 		];
-		const kpis = computeKpis(sessions, periods, []);
-		expect(kpis.currentPeriod).toEqual({ label: 'July 2026', homePct: 0.75 });
+		const stats = computeCurrentPeriodStats(current, sessions, []);
+		expect(stats).toMatchObject({
+			label: 'July 2026',
+			homeKwh: 30,
+			publicKwh: 10,
+			homeCost: 9,
+			homePct: 0.75
+		});
+	});
+
+	it('averages efficiency points belonging only to the current period', () => {
+		const current = period({ id: 2, label: 'July 2026' });
+		const sessions: DashboardSession[] = [
+			session({ id: 1, billingPeriodId: 1, kind: 'home' }),
+			session({ id: 2, billingPeriodId: 2, kind: 'home' })
+		];
+		const efficiencySeries = [
+			{ sessionId: 1, date: '2026-06-15', kmPerKwh: 4 }, // previous period, excluded
+			{ sessionId: 2, date: '2026-07-15', kmPerKwh: 8 }
+		];
+		const stats = computeCurrentPeriodStats(current, sessions, efficiencySeries);
+		expect(stats?.avgEfficiency).toBe(8);
+		expect(stats?.avgKwhPer100Km).toBe(12.5);
 	});
 });

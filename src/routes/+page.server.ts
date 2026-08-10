@@ -1,9 +1,12 @@
 import { db } from '$lib/server/db';
 import { billingPeriods, chargingSessions } from '$lib/server/db/schema';
 import {
+	computeCurrentPeriodStats,
 	computeEfficiencySeries,
 	computeKpis,
 	computePeriodSplits,
+	excludeCurrentPeriod,
+	findCurrentPeriod,
 	type DashboardPeriod,
 	type DashboardSession
 } from '$lib/dashboard';
@@ -38,12 +41,33 @@ export const load: PageServerLoad = async () => {
 		id: row.id,
 		label: row.label,
 		startDate: row.startDate,
-		endDate: row.endDate
+		endDate: row.endDate,
+		submittedAt: row.submittedAt
 	}));
 
-	const efficiencySeries = computeEfficiencySeries(sessions);
-	const periodSplits = computePeriodSplits(periods, sessions);
-	const kpis = computeKpis(sessions, periods, efficiencySeries);
+	// The current (not-yet-submitted) period is carved out of everything below
+	// it: it's still accumulating sessions, so it gets its own stats up top
+	// instead of appearing as a misleadingly-partial bar/point in the
+	// historical charts.
+	const currentPeriod = findCurrentPeriod(periods);
+	const efficiencySeriesAll = computeEfficiencySeries(sessions);
+	const currentPeriodStats = computeCurrentPeriodStats(
+		currentPeriod,
+		sessions,
+		efficiencySeriesAll
+	);
 
-	return { efficiencySeries, periodSplits, kpis };
+	const { historicalPeriods, historicalSessions } = excludeCurrentPeriod(
+		periods,
+		sessions,
+		currentPeriod
+	);
+	const efficiencySeries = computeEfficiencySeries(historicalSessions);
+	const periodSplits = computePeriodSplits(historicalPeriods, historicalSessions);
+
+	// Lifetime KPIs stay cumulative (including whatever's logged in the
+	// current period so far) — only the period-comparison charts above exclude it.
+	const kpis = computeKpis(sessions, efficiencySeriesAll);
+
+	return { efficiencySeries, periodSplits, kpis, currentPeriodStats };
 };
