@@ -34,7 +34,8 @@
 
 	<p>
 		Review the parsed data below and fix anything that's wrong before committing. Rows flagged below
-		are missing a field the parser couldn't confidently read.
+		are either missing a field the parser couldn't confidently read, or have a date outside the
+		billing period entered below.
 	</p>
 
 	{#if review.issues.length > 0}

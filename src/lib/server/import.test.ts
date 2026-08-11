@@ -266,10 +266,10 @@ describe('parseImportWorkbook', () => {
 		// this must be converted rather than passed through as-is.
 		const buffer = await buildFixture({
 			homeRows: [
-				['8:30 AM', new Date('2026-03-01'), 12000, 8.5, 'Test User Garage'],
-				['7:15 PM', new Date('2026-03-05'), 12210, 10.2, 'Test User Garage'],
-				['12:00 AM', new Date('2026-03-10'), 12300, 5.0, 'Test User Garage'],
-				['12:30 PM', new Date('2026-03-12'), 12400, 6.0, 'Test User Garage']
+				['8:30 AM', new Date('2026-07-01'), 12000, 8.5, 'Test User Garage'],
+				['7:15 PM', new Date('2026-07-05'), 12210, 10.2, 'Test User Garage'],
+				['12:00 AM', new Date('2026-07-10'), 12300, 5.0, 'Test User Garage'],
+				['12:30 PM', new Date('2026-07-12'), 12400, 6.0, 'Test User Garage']
 			]
 		});
 
@@ -297,6 +297,34 @@ describe('parseImportWorkbook', () => {
 		const rowIssues = result.issues.filter((i) => i.section === 'home');
 		expect(rowIssues.length).toBeGreaterThan(0);
 		expect(rowIssues[0].message).toMatch(/missing/i);
+	});
+
+	it("flags a row whose date falls outside the sheet's own claimed period range", async () => {
+		// Simulates a legacy file copied forward from an old template with a
+		// stale cell left behind — every field is populated, so nothing else
+		// would catch this, but the year is nonsensical for a July 2026 sheet.
+		const buffer = await buildFixture({
+			homeRows: [
+				['08:30', new Date('2026-07-01'), 12000, 8.5, 'Test User Garage'],
+				['19:15', new Date('2023-07-05'), 12210, 10.2, 'Test User Garage']
+			]
+		});
+
+		const result = await parseImportWorkbook(buffer);
+
+		expect(result.homeSessions).toHaveLength(2);
+		expect(result.homeSessions[1].date).toBe('2023-07-05');
+
+		const rowIssues = result.issues.filter((i) => i.section === 'home');
+		expect(rowIssues).toHaveLength(1);
+		expect(rowIssues[0].message).toMatch(/outside the claimed period/i);
+		expect(rowIssues[0].row).toBe(result.homeSessions[1].row);
+	});
+
+	it('does not flag a date within the claimed period range', async () => {
+		const buffer = await buildFixture();
+		const result = await parseImportWorkbook(buffer);
+		expect(result.issues).toHaveLength(0);
 	});
 
 	it('flags an unparseable home table when no table header row exists anywhere', async () => {

@@ -16,7 +16,7 @@ export const load: PageServerLoad = async ({ params }) => {
 		.select()
 		.from(chargingSessions)
 		.where(eq(chargingSessions.billingPeriodId, id))
-		.orderBy(asc(chargingSessions.date), asc(chargingSessions.time));
+		.orderBy(asc(chargingSessions.date), asc(chargingSessions.time), asc(chargingSessions.id));
 
 	// Drafts (kwhUsed or odometerKm not yet recorded) are shown separately and left out
 	// of the report totals, since there's nothing to sum yet. Completed sessions always

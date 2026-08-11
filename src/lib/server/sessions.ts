@@ -33,13 +33,18 @@ export function isPeriodSubmitted(period: SubmittableBillingPeriod | null | unde
 	return period?.submittedAt != null;
 }
 
-/** Sorts sessions chronologically (ascending) by date then time. */
-export function sortByDateTimeAsc<T extends SessionDateTime>(rows: T[]): T[] {
-	return [...rows].sort((a, b) => (a.date + a.time).localeCompare(b.date + b.time));
+/**
+ * Sorts sessions chronologically (ascending) by date then time, tie-broken by
+ * id so two sessions logged at the exact same date/time (not uncommon with
+ * demo data or same-minute entries) still sort deterministically instead of
+ * depending on whatever order they happened to arrive from the database in.
+ */
+export function sortByDateTimeAsc<T extends SessionDateTime & { id: number }>(rows: T[]): T[] {
+	return [...rows].sort((a, b) => (a.date + a.time).localeCompare(b.date + b.time) || a.id - b.id);
 }
 
 /** Sorts sessions reverse-chronologically (descending) by date then time. */
-export function sortByDateTimeDesc<T extends SessionDateTime>(rows: T[]): T[] {
+export function sortByDateTimeDesc<T extends SessionDateTime & { id: number }>(rows: T[]): T[] {
 	return sortByDateTimeAsc(rows).reverse();
 }
 

@@ -27,7 +27,7 @@ export const GET: RequestHandler = async ({ params }) => {
 		.select()
 		.from(chargingSessions)
 		.where(eq(chargingSessions.billingPeriodId, id))
-		.orderBy(asc(chargingSessions.date), asc(chargingSessions.time));
+		.orderBy(asc(chargingSessions.date), asc(chargingSessions.time), asc(chargingSessions.id));
 
 	const [settingsRow] = await db.select().from(settings).limit(1);
 

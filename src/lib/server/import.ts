@@ -211,6 +211,37 @@ function findTableHeaderRow(
 	return null;
 }
 
+/**
+ * Flags any session whose parsed date falls outside the sheet's own claimed
+ * `[startDate, endDate]` period range. Legacy files are occasionally copied
+ * forward from an older month's template with a stale cell left behind (e.g.
+ * a formula-filled date that never got dragged down/updated) — those rows
+ * still have every field populated, so they'd otherwise sail through review
+ * unflagged and get silently stamped with the wrong billing period at commit
+ * time (unlike a manually-logged or Evnex-imported session, whose period is
+ * derived from its own date — see `findBillingPeriodId` in sessions.ts).
+ * Doesn't exclude the row: the date is still editable on the review screen,
+ * and an out-of-range date isn't necessarily wrong (e.g. a charge just
+ * before/after the claimed boundary), just worth a human look.
+ */
+function flagOutOfRangeDates(
+	sessions: ParsedSession[],
+	startDate: string | null,
+	endDate: string | null,
+	issues: ImportIssue[]
+): void {
+	if (!startDate || !endDate) return;
+	for (const session of sessions) {
+		if (session.date && (session.date < startDate || session.date > endDate)) {
+			issues.push({
+				section: session.kind,
+				row: session.row,
+				message: `Row ${session.row} (${session.kind}): date ${session.date} is outside the claimed period ${startDate} – ${endDate} — please review.`
+			});
+		}
+	}
+}
+
 /** Reads data rows below a table header until it hits a blank row run or the next label. */
 function readSessionTable(
 	sheet: ExcelJS.Worksheet,
@@ -396,6 +427,9 @@ export async function parseImportWorkbook(buffer: Buffer | ArrayBuffer): Promise
 			);
 		}
 	}
+
+	flagOutOfRangeDates(homeSessions, header.startDate, header.endDate, issues);
+	flagOutOfRangeDates(publicSessions, header.startDate, header.endDate, issues);
 
 	return { header, homeSessions, publicSessions, issues };
 }

@@ -36,6 +36,13 @@
       "when": 1786149657447,
       "tag": "0004_needy_power_man",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "6",
+      "when": 1786439313931,
+      "tag": "0005_fix_mistyped_session_year",
+      "breakpoints": true
     }
   ]
 }
