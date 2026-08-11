@@ -4,18 +4,18 @@ import { db } from '$lib/server/db';
 import { evnexIntegration } from '$lib/server/db/schema';
 import {
 	EvnexApiError,
-	EvnexNetworkError as EvnexClientNetworkError,
+	clientFor,
 	fetchChargePoints,
 	fetchOrgId,
 	type EvnexChargePointInfo
 } from '$lib/server/evnex-client';
-import { EvnexNetworkError as EvnexAuthNetworkError } from '$lib/server/evnex-auth';
+import { EvnexNetworkError, EvnexRefreshExpiredError } from '$lib/server/evnex-auth';
 import {
 	clearCachedChargePoints,
 	getCachedChargePoints,
 	setCachedChargePoints
 } from '$lib/server/evnex-charge-points-cache';
-import { ensureAccessToken } from '$lib/server/evnex-token';
+import { recordAuthFailure, sessionFor } from '$lib/server/evnex-token';
 import type { RequestHandler } from './$types';
 
 // Fetched client-side by /settings after the page has already rendered (see
@@ -42,20 +42,23 @@ export const GET: RequestHandler = async ({ url }) => {
 	}
 
 	try {
-		const accessToken = await ensureAccessToken(integration);
+		const client = clientFor(sessionFor(integration));
 		let orgId = integration.orgId;
 		if (orgId == null) {
-			orgId = await fetchOrgId(accessToken);
+			orgId = await fetchOrgId(client);
 			await db
 				.update(evnexIntegration)
 				.set({ orgId })
 				.where(eq(evnexIntegration.id, integration.id));
 		}
-		const chargePoints: EvnexChargePointInfo[] = await fetchChargePoints(accessToken, orgId);
+		const chargePoints: EvnexChargePointInfo[] = await fetchChargePoints(client, orgId);
 		const result = { chargePoints, chargePointsError: null };
 		setCachedChargePoints(result);
 		return json(result);
 	} catch (err) {
+		if (err instanceof EvnexRefreshExpiredError) {
+			await recordAuthFailure(integration.id, err);
+		}
 		// Never let a flaky Evnex API error the whole /settings page — fall back to
 		// showing just the already-selected charger (if any) and a note. Surface the
 		// real error (status + correlation id, never a raw token) rather than a
@@ -66,7 +69,7 @@ export const GET: RequestHandler = async ({ url }) => {
 		const chargePointsError =
 			err instanceof EvnexApiError
 				? `Could not list charge points: ${err.message}${err.correlationId ? ` (ref: ${err.correlationId})` : ''}`
-				: err instanceof EvnexClientNetworkError || err instanceof EvnexAuthNetworkError
+				: err instanceof EvnexNetworkError
 					? `Could not reach Evnex to list charge points: ${err.message}`
 					: `Something went wrong listing charge points: ${err instanceof Error ? err.message : String(err)}`;
 		const chargePoints: EvnexChargePointInfo[] =

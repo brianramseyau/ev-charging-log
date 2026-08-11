@@ -302,19 +302,3 @@ export function planImport(
 
 	return { insert, update, tombstone, skipped };
 }
-
-/**
- * Whether a Cognito access token should be treated as expired and refreshed
- * before use. Applies a clock-skew margin (plan §6.6 step 2: 30-60s) so a
- * token that's about to expire gets refreshed proactively instead of being
- * used and immediately 401ing. `null` (never signed in / disconnected) is
- * always expired.
- */
-const CLOCK_SKEW_MARGIN_MS = 45_000;
-
-export function isTokenExpired(expiresAt: string | null, now: Date): boolean {
-	if (expiresAt == null) return true;
-	const expiresAtMs = new Date(expiresAt).getTime();
-	if (Number.isNaN(expiresAtMs)) return true;
-	return expiresAtMs - CLOCK_SKEW_MARGIN_MS <= now.getTime();
-}

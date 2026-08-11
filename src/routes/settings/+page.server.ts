@@ -5,11 +5,17 @@ import { db } from '$lib/server/db';
 import { evnexIntegration, settings } from '$lib/server/db/schema';
 import {
 	EvnexMfaRequiredError,
-	EvnexNetworkError as EvnexAuthNetworkError,
+	EvnexNetworkError,
 	EvnexSignInError,
 	signIn as evnexSignIn
 } from '$lib/server/evnex-auth';
-import { fetchChargePoints, fetchOrgId, type EvnexChargePointInfo } from '$lib/server/evnex-client';
+import {
+	clientFor,
+	fetchChargePoints,
+	fetchOrgId,
+	type EvnexChargePointInfo
+} from '$lib/server/evnex-client';
+import { sessionFor } from '$lib/server/evnex-token';
 import {
 	clearCachedChargePoints,
 	setCachedChargePoints
@@ -120,7 +126,7 @@ export const actions: Actions = {
 					connectError: 'Sign-in failed — check the email and password and try again.'
 				});
 			}
-			if (err instanceof EvnexAuthNetworkError) {
+			if (err instanceof EvnexNetworkError) {
 				return fail(502, { connectError: 'Could not reach Evnex. Try again in a moment.' });
 			}
 			return fail(500, { connectError: 'Something went wrong signing in to Evnex.' });
@@ -162,9 +168,10 @@ export const actions: Actions = {
 
 		let chargePoints: EvnexChargePointInfo[];
 		try {
-			const orgId = await fetchOrgId(tokenSet.accessToken);
+			const client = clientFor(sessionFor(integrationRow));
+			const orgId = await fetchOrgId(client);
 			await db.update(evnexIntegration).set({ orgId }).where(eqId(integrationRow.id));
-			chargePoints = await fetchChargePoints(tokenSet.accessToken, orgId);
+			chargePoints = await fetchChargePoints(client, orgId);
 			// Populate the cache /settings/charge-points reads from, so the browser's
 			// own fetch right after this action lands (once cardState flips to
 			// 'connected') replays this result instead of hitting Evnex again.

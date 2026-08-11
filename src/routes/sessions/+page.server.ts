@@ -19,19 +19,15 @@ import {
 } from '$lib/server/sessions';
 import { calculateSessionCost, resolveRatePlan } from '$lib/server/rates';
 import { importWindow, planImport, type DraftFromEvnex } from '$lib/server/evnex';
-import {
-	EvnexNetworkError as EvnexAuthNetworkError,
-	EvnexRefreshExpiredError
-} from '$lib/server/evnex-auth';
+import { EvnexNetworkError, EvnexRefreshExpiredError } from '$lib/server/evnex-auth';
 import {
 	EvnexApiError,
-	EvnexNetworkError as EvnexClientNetworkError,
-	EvnexUnauthorizedError,
+	clientFor,
 	fetchChargePoints,
 	fetchOrgId,
 	fetchSessions
 } from '$lib/server/evnex-client';
-import { ensureAccessToken, refreshAndPersist } from '$lib/server/evnex-token';
+import { recordAuthFailure, sessionFor } from '$lib/server/evnex-token';
 
 export const load: PageServerLoad = async () => {
 	const [sessions, periods, [settingsRow], [integration]] = await Promise.all([
@@ -88,9 +84,7 @@ function readForm(form: FormData): FormValues {
 }
 
 function classifyPollError(err: unknown): 'network_error' | 'api_error' {
-	return err instanceof EvnexAuthNetworkError || err instanceof EvnexClientNetworkError
-		? 'network_error'
-		: 'api_error';
+	return err instanceof EvnexNetworkError ? 'network_error' : 'api_error';
 }
 
 function pollErrorMessage(err: unknown): string {
@@ -336,51 +330,25 @@ export const actions: Actions = {
 			});
 		}
 
-		let accessToken: string;
-		try {
-			accessToken = await ensureAccessToken(integration);
-		} catch (err) {
-			if (err instanceof EvnexRefreshExpiredError) {
-				return fail(400, {
-					pollError: 'Your Evnex session has expired — reconnect in Settings.'
-				});
-			}
-			return fail(502, { pollError: 'Could not reach Evnex to refresh the session.' });
-		}
-
-		// One refresh-and-retry on a 401, never a loop — a token can be invalidated
-		// before its nominal expiry, so the proactive check above isn't sufficient on
-		// its own (plan §4.3/§6.6 steps 3-4).
-		async function callWithReauth<T>(fn: (token: string) => Promise<T>): Promise<T> {
-			try {
-				return await fn(accessToken);
-			} catch (err) {
-				if (err instanceof EvnexUnauthorizedError) {
-					accessToken = await refreshAndPersist(integration);
-					return await fn(accessToken);
-				}
-				throw err;
-			}
-		}
+		const client = clientFor(sessionFor(integration));
 
 		let orgId = integration.orgId;
 		let chargePoints: Awaited<ReturnType<typeof fetchChargePoints>>;
 		let remoteSessions: Awaited<ReturnType<typeof fetchSessions>>;
 		try {
 			if (orgId == null) {
-				orgId = await callWithReauth((token) => fetchOrgId(token));
+				orgId = await fetchOrgId(client);
 				await db
 					.update(evnexIntegration)
 					.set({ orgId })
 					.where(eq(evnexIntegration.id, integration.id));
 			}
 
-			chargePoints = await callWithReauth((token) => fetchChargePoints(token, orgId as string));
-			remoteSessions = await callWithReauth((token) =>
-				fetchSessions(token, integration.chargePointId as string)
-			);
+			chargePoints = await fetchChargePoints(client, orgId);
+			remoteSessions = await fetchSessions(client, integration.chargePointId as string);
 		} catch (err) {
 			if (err instanceof EvnexRefreshExpiredError) {
+				await recordAuthFailure(integration.id, err);
 				return fail(400, {
 					pollError: 'Your Evnex session has expired — reconnect in Settings.'
 				});
