@@ -1,52 +1,20 @@
-// Cognito sign-in and refresh for the Evnex consumer Cloud API. The ONLY place in
-// the app that knows about Cognito or imports amazon-cognito-identity-js — everything
-// outside this file sees a plain token set. See foundational/EVNEX-INTEGRATION-PLAN.md
-// §4.2 and §5.6.
+// Session/token lifecycle for the Evnex consumer Cloud API, on top of the
+// `evnex-client` npm package's `EvnexAuth`. The ONLY place in the app that
+// imports `evnex-client/auth` — everything outside this file sees a plain
+// token set (`EvnexTokenSet`) or a ready-built `EvnexAuth` handed back from
+// `buildEvnexAuth`/`evnex-token.ts`'s `sessionFor`. See
+// foundational/EVNEX-INTEGRATION-PLAN.md §4.2 and §5.6.
 //
-// Uses SRP (`authenticateUser`/`refreshSession`, i.e. USER_SRP_AUTH /
-// REFRESH_TOKEN_AUTH), matching python-evnex and the Evnex mobile app. Do NOT
-// substitute USER_PASSWORD_AUTH via a raw InitiateAuth call, even though it's less
-// code: the app client belongs to Evnex, ALLOW_USER_PASSWORD_AUTH is an explicit
-// per-client setting that is commonly left off, and SRP is demonstrably permitted
-// because it's what the mobile app and python-evnex both use. Under SRP the password
-// is never transmitted, only a zero-knowledge proof of it — combined with never
-// persisting the password (see below), it never touches the database.
-import {
-	AuthenticationDetails,
-	CognitoRefreshToken,
-	CognitoUser,
-	CognitoUserPool,
-	type CognitoUserSession,
-	type ICognitoStorage
-} from 'amazon-cognito-identity-js';
-
-const USER_POOL_ID = 'ap-southeast-2_zWnqo6ASv';
-// This is the mobile app's Cognito client ID, not one issued to this project — it's a
-// public client (no client secret) and could be rotated by Evnex at any time. There is
-// no published spec for any of this; see plan §4.0.
-const CLIENT_ID = 'rol3lsv2vg41783550i18r7vi';
-
-// amazon-cognito-identity-js targets browsers and defaults to `localStorage`, which
-// doesn't exist server-side. This shim only needs to survive a single sign-in/refresh
-// call — the resulting tokens are persisted to the database by the caller, not by
-// this library's own storage.
-function memoryStorage(): ICognitoStorage {
-	const store = new Map<string, string>();
-	return {
-		getItem: (key) => store.get(key) ?? null,
-		setItem: (key, value) => void store.set(key, value),
-		removeItem: (key) => void store.delete(key),
-		clear: () => store.clear()
-	};
-}
-
-function userPool(): CognitoUserPool {
-	return new CognitoUserPool({
-		UserPoolId: USER_POOL_ID,
-		ClientId: CLIENT_ID,
-		Storage: memoryStorage()
-	});
-}
+// `EvnexAuth` signs in via SRP (matching python-evnex and the Evnex mobile
+// app — see the package's own README) and, once resumed from a stored
+// refresh token, refreshes itself automatically: proactively before an
+// access token expires, and reactively on a 401 from any API call, with
+// exactly one retry. Neither of those needs this app's own polling or
+// retry logic any more — `evnex-client.ts` just makes calls through the
+// `EvnexAuth`/`Evnex` pair, and this file's `EvnexRefreshExpiredError` is
+// the one signal that means "give up, the user needs to reconnect."
+import { EvnexAuth, TokenSet, isAuthChallenge, type TokenUpdateCallback } from 'evnex-client/auth';
+import { EvnexAuthError, PasswordChangeRequiredError } from 'evnex-client';
 
 export interface EvnexTokenSet {
 	/** JWT. Send as the bare `Authorization` header value — no `Bearer ` prefix (plan §4.3). */
@@ -75,9 +43,12 @@ export class EvnexSignInError extends Error {
 }
 
 /**
- * The refresh token itself is invalid — expired or revoked. This is terminal: no
- * amount of retrying fixes it, only a fresh sign-in (password + reconnect) can. The
- * caller should record `lastPollStatus = 'auth_failed'` and stop (plan §5.1, §6.6 step 2).
+ * The refresh token itself is invalid, revoked, or the session otherwise can't be
+ * renewed — surfaced either from a resumed session's own refresh attempt or, via
+ * `evnex-client.ts`, from any API call the SDK couldn't recover with its own
+ * refresh-and-retry. Terminal: no amount of retrying fixes it, only a fresh sign-in
+ * (password + reconnect) can. The caller should record `lastPollStatus = 'auth_failed'`
+ * and stop (plan §5.1, §6.6 step 2).
  */
 export class EvnexRefreshExpiredError extends Error {
 	constructor(options?: { cause?: unknown }) {
@@ -86,7 +57,7 @@ export class EvnexRefreshExpiredError extends Error {
 	}
 }
 
-/** A network-level failure talking to Cognito (DNS, timeout, connection reset, etc). Retryable. */
+/** A network-level failure talking to Evnex/Cognito (DNS, timeout, connection reset, etc). Retryable. */
 export class EvnexNetworkError extends Error {
 	constructor(message: string, options?: { cause?: unknown }) {
 		super(message, options);
@@ -94,31 +65,23 @@ export class EvnexNetworkError extends Error {
 	}
 }
 
-function toTokenSet(session: CognitoUserSession, fallbackRefreshToken: string): EvnexTokenSet {
-	const accessToken = session.getAccessToken();
-	// Cognito only returns a new refresh token if rotation is enabled on the app
-	// client; amazon-cognito-identity-js's own refreshSession already carries the
-	// supplied token forward when the response omits one, but falling back here too
-	// is cheap insurance against ever writing `undefined` over a live refresh token
-	// (which would silently kill the integration at the next access-token expiry —
-	// plan §4.2/§6.6).
-	const refreshToken = session.getRefreshToken().getToken() || fallbackRefreshToken;
-	return {
-		accessToken: accessToken.getJwtToken(),
-		refreshToken,
-		accessTokenExpiresAt: new Date(accessToken.getExpiration() * 1000).toISOString()
-	};
-}
-
-function isNetworkFailure(err: unknown): boolean {
-	// The AWS SDK layer amazon-cognito-identity-js sits on surfaces transport
-	// failures as errors without a Cognito `code` (e.g. `NetworkingError`,
-	// `TimeoutError`, or a bare fetch/XHR failure) — anything with a recognizable
-	// Cognito exception code is an auth decision, not a network problem.
-	if (err && typeof err === 'object' && 'code' in err && typeof err.code === 'string') {
-		return false;
+/**
+ * `tokens.accessToken`/`refreshToken`/`expiresAt` are optional at the type level (a
+ * partially-populated resumed session), but every path that reaches here — a fresh
+ * sign-in, or the SDK's own refresh — always yields all three: Cognito's
+ * PASSWORD_VERIFIER/REFRESH_TOKEN_AUTH results always carry an access token, and
+ * `TokenSet`'s own carry-forward logic (package `tokensFromCognito`) already handles
+ * a refresh response that omits the refresh token.
+ */
+function toTokenSet(tokens: TokenSet): EvnexTokenSet {
+	if (!tokens.accessToken || !tokens.refreshToken || !tokens.expiresAt) {
+		throw new EvnexSignInError('Evnex returned an incomplete token set.');
 	}
-	return true;
+	return {
+		accessToken: tokens.accessToken,
+		refreshToken: tokens.refreshToken,
+		accessTokenExpiresAt: tokens.expiresAt.toISOString()
+	};
 }
 
 /**
@@ -127,72 +90,57 @@ function isNetworkFailure(err: unknown): boolean {
  * account has TOTP enabled (this only ever arises at sign-in, never on refresh —
  * plan §4.2).
  */
-export function signIn(email: string, password: string): Promise<EvnexTokenSet> {
-	const pool = userPool();
-	const cognitoUser = new CognitoUser({ Username: email, Pool: pool });
-	const authDetails = new AuthenticationDetails({ Username: email, Password: password });
-
-	return new Promise((resolve, reject) => {
-		cognitoUser.authenticateUser(authDetails, {
-			onSuccess: (session) => {
-				try {
-					// No prior refresh token exists yet on first sign-in, so there's
-					// nothing to fall back to — Cognito always returns one here.
-					resolve(toTokenSet(session, ''));
-				} catch (err) {
-					reject(err instanceof Error ? err : new EvnexSignInError(String(err)));
-				}
-			},
-			onFailure: (err) => {
-				if (isNetworkFailure(err)) {
-					reject(new EvnexNetworkError('Could not reach Evnex to sign in.', { cause: err }));
-				} else {
-					reject(new EvnexSignInError(err?.message ?? 'Evnex sign-in failed.', { cause: err }));
-				}
-			},
-			totpRequired: () => reject(new EvnexMfaRequiredError()),
-			mfaRequired: () => reject(new EvnexMfaRequiredError()),
-			mfaSetup: () => reject(new EvnexMfaRequiredError())
-		});
-	});
+export async function signIn(email: string, password: string): Promise<EvnexTokenSet> {
+	const auth = new EvnexAuth();
+	let result;
+	try {
+		result = await auth.startAuthentication(email, password);
+	} catch (err) {
+		if (err instanceof PasswordChangeRequiredError) {
+			throw new EvnexSignInError(
+				'This Evnex account requires a password change before it can sign in.',
+				{ cause: err }
+			);
+		}
+		if (err instanceof EvnexAuthError) {
+			throw new EvnexSignInError(err.message, { cause: err });
+		}
+		throw new EvnexNetworkError('Could not reach Evnex to sign in.', { cause: err });
+	}
+	// Any challenge at all (SMS/TOTP MFA, a NEW_PASSWORD_REQUIRED that somehow
+	// didn't throw) is treated as the one case this app deliberately doesn't support.
+	if (isAuthChallenge(result)) {
+		throw new EvnexMfaRequiredError();
+	}
+	return toTokenSet(result);
 }
 
 /**
- * Resumes a session from a refresh token — no password, no MFA prompt. Throws
- * `EvnexRefreshExpiredError` (terminal) if the refresh token itself is no longer
- * valid, or `EvnexNetworkError` (retryable) on a transport failure.
+ * Builds an `EvnexAuth` resumed from a previously stored token set, wired so every
+ * token the SDK issues from here on — a proactive refresh before expiry, or a
+ * reactive one after a 401 — is handed to `onTokenUpdate` before it's used for any
+ * request (the package's own persist-before-publish guarantee). `evnex-token.ts`'s
+ * `sessionFor` is the only caller: it supplies the `onTokenUpdate` that actually
+ * writes the row back to the database, keeping this file free of any db import per
+ * CLAUDE.md's layering convention.
  */
-export function refresh(email: string, refreshToken: string): Promise<EvnexTokenSet> {
-	const pool = userPool();
-	const cognitoUser = new CognitoUser({ Username: email, Pool: pool });
-
-	return new Promise((resolve, reject) => {
-		cognitoUser.refreshSession(
-			new CognitoRefreshToken({ RefreshToken: refreshToken }),
-			(err, session) => {
-				if (err) {
-					if (
-						err &&
-						typeof err === 'object' &&
-						'code' in err &&
-						(err.code === 'NotAuthorizedException' || err.code === 'UserNotFoundException')
-					) {
-						reject(new EvnexRefreshExpiredError({ cause: err }));
-					} else if (isNetworkFailure(err)) {
-						reject(
-							new EvnexNetworkError('Could not reach Evnex to refresh the session.', { cause: err })
-						);
-					} else {
-						reject(new EvnexRefreshExpiredError({ cause: err }));
-					}
-					return;
-				}
-				try {
-					resolve(toTokenSet(session as CognitoUserSession, refreshToken));
-				} catch (e) {
-					reject(e instanceof Error ? e : new EvnexRefreshExpiredError({ cause: e }));
-				}
-			}
-		);
+export function buildEvnexAuth(
+	tokens: {
+		accessToken: string | null;
+		refreshToken: string | null;
+		accessTokenExpiresAt: string | null;
+	},
+	onTokenUpdate: (tokens: EvnexTokenSet) => Promise<void>
+): EvnexAuth {
+	const wrappedOnTokenUpdate: TokenUpdateCallback = async (ts) => {
+		await onTokenUpdate(toTokenSet(ts));
+	};
+	return new EvnexAuth({
+		tokens: TokenSet.fromJSON({
+			access_token: tokens.accessToken,
+			refresh_token: tokens.refreshToken,
+			expires_at: tokens.accessTokenExpiresAt
+		}),
+		onTokenUpdate: wrappedOnTokenUpdate
 	});
 }

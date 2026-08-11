@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
 	importWindow,
-	isTokenExpired,
 	planImport,
 	toDraftSession,
 	type EvnexSessionPayload,
@@ -328,41 +327,5 @@ describe('planImport', () => {
 		// Should be treated as a fresh insert, not matched against the manual row.
 		expect(result.insert).toHaveLength(1);
 		expect(result.update).toEqual([]);
-	});
-});
-
-describe('isTokenExpired', () => {
-	it('is expired when there is no token at all', () => {
-		expect(isTokenExpired(null, new Date('2026-08-08T10:00:00.000Z'))).toBe(true);
-	});
-
-	it('is not expired well before expiresAt', () => {
-		const expiresAt = '2026-08-08T11:00:00.000Z';
-		const now = new Date('2026-08-08T10:00:00.000Z');
-		expect(isTokenExpired(expiresAt, now)).toBe(false);
-	});
-
-	it('is expired once now is past expiresAt', () => {
-		const expiresAt = '2026-08-08T10:00:00.000Z';
-		const now = new Date('2026-08-08T10:05:00.000Z');
-		expect(isTokenExpired(expiresAt, now)).toBe(true);
-	});
-
-	it('treats a token inside the clock-skew margin as expired (proactive refresh)', () => {
-		const expiresAt = '2026-08-08T10:00:00.000Z';
-		// 20 seconds before nominal expiry - within a 30-60s margin, should refresh now.
-		const now = new Date('2026-08-08T09:59:40.000Z');
-		expect(isTokenExpired(expiresAt, now)).toBe(true);
-	});
-
-	it('is not expired just outside the clock-skew margin', () => {
-		const expiresAt = '2026-08-08T10:00:00.000Z';
-		// 2 minutes before nominal expiry - safely outside any 30-60s margin.
-		const now = new Date('2026-08-08T09:58:00.000Z');
-		expect(isTokenExpired(expiresAt, now)).toBe(false);
-	});
-
-	it('treats an unparseable expiresAt as expired', () => {
-		expect(isTokenExpired('not-a-date', new Date())).toBe(true);
 	});
 });
