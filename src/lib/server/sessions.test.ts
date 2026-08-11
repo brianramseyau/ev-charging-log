@@ -41,6 +41,16 @@ describe('sortByDateTimeAsc / sortByDateTimeDesc', () => {
 		sortByDateTimeAsc(rows);
 		expect(rows).toEqual(original);
 	});
+
+	it('breaks ties on identical date/time by id, regardless of input order', () => {
+		const rows = [
+			s(3, '2026-08-02', '09:00', 100, 10),
+			s(1, '2026-08-02', '09:00', 90, 10),
+			s(2, '2026-08-02', '09:00', 95, 10)
+		];
+		expect(sortByDateTimeAsc(rows).map((r) => r.id)).toEqual([1, 2, 3]);
+		expect(sortByDateTimeDesc(rows).map((r) => r.id)).toEqual([3, 2, 1]);
+	});
 });
 
 describe('mostRecentOdometer', () => {
