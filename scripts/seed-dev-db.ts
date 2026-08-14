@@ -163,30 +163,13 @@ async function main() {
 		return date >= rateChangeDate ? HOME_FLAT_RATE_NEW : HOME_FLAT_RATE_OLD;
 	}
 
-	const periodIds: { start: Date; end: Date; id: number }[] = [];
-	for (const m of months) {
-		const isCurrent = m.start.getTime() === currentMonthStart.getTime();
-		const [row] = db
-			.insert(billingPeriods)
-			.values({
-				label: monthLabel(m.start),
-				startDate: ymd(m.start),
-				endDate: ymd(m.end),
-				submittedAt: isCurrent ? null : addDays(m.end, 4).toISOString()
-			})
-			.returning()
-			.all();
-		periodIds.push({ start: m.start, end: m.end, id: row.id });
-	}
-
-	function periodIdFor(date: string): number {
-		return periodIds.find((p) => ymd(p.start) <= date && date <= ymd(p.end))!.id;
-	}
-
-	// Walk day by day from the start of the seeded range to today, charging at
-	// home roughly every 3 days and stopping for a public charge roughly once a
-	// month, with a plausible efficiency (km driven per kWh) driving the
-	// odometer forward rather than incrementing it arbitrarily.
+	// Walk day by day from the start of the seeded range up to 14 days ago,
+	// charging at home roughly every 3 days and stopping for a public charge
+	// roughly once a month, with a plausible efficiency (km driven per kWh)
+	// driving the odometer forward rather than incrementing it arbitrarily.
+	// Nothing newer than that cutoff is seeded, leaving a gap that looks like
+	// real (not-yet-imported) recent activity rather than a suspiciously
+	// complete history.
 	type SeedSession = {
 		date: string;
 		time: string;
@@ -198,9 +181,10 @@ async function main() {
 	const sessions: SeedSession[] = [];
 	let odometerKm = 38000 + Math.floor(randRange(0, 2000));
 	let cursor = new Date(pastMonths[0].start);
+	const seedCutoff = addDays(today, -14);
 	let daysSinceHome = 0;
 	let daysSincePublic = 0;
-	while (cursor <= today) {
+	while (cursor <= seedCutoff) {
 		daysSinceHome++;
 		daysSincePublic++;
 
@@ -239,10 +223,36 @@ async function main() {
 		cursor = addDays(cursor, 1);
 	}
 
-	// Leave the most recent session (necessarily in the current, unsubmitted
-	// period) as a draft, to demonstrate the "complete a session" flow.
+	// Leave the most recent session as a draft, to demonstrate the "complete a
+	// session" flow. The 14-day cutoff above can push this into the last past
+	// month rather than the current one (e.g. seeding on the 1st–14th of a
+	// month), so a period can't just be submitted because it isn't the current
+	// one — any period from the draft's month onward must stay unsubmitted, or
+	// the draft would land in a period that's already closed for changes.
 	const lastSession = sessions[sessions.length - 1];
 	const draftKwh = lastSession.kwhUsed;
+	const [draftYear, draftMonth] = lastSession.date.split('-').map(Number);
+	const draftMonthStart = monthStart(draftYear, draftMonth - 1);
+
+	const periodIds: { start: Date; end: Date; id: number }[] = [];
+	for (const m of months) {
+		const isSubmitted = m.start.getTime() < draftMonthStart.getTime();
+		const [row] = db
+			.insert(billingPeriods)
+			.values({
+				label: monthLabel(m.start),
+				startDate: ymd(m.start),
+				endDate: ymd(m.end),
+				submittedAt: isSubmitted ? addDays(m.end, 4).toISOString() : null
+			})
+			.returning()
+			.all();
+		periodIds.push({ start: m.start, end: m.end, id: row.id });
+	}
+
+	function periodIdFor(date: string): number {
+		return periodIds.find((p) => ymd(p.start) <= date && date <= ymd(p.end))!.id;
+	}
 
 	for (const s of sessions) {
 		const isDraft = s === lastSession;
@@ -254,6 +264,9 @@ async function main() {
 				kind: s.kind,
 				date: s.date,
 				time: s.time,
+				// Manually-logged sessions always require an odometer up front (only
+				// Evnex imports, which have externalId set, can be missing it) — the
+				// draft here is only ever missing kWh, never the odometer.
 				odometerKm: s.odometerKm,
 				kwhUsed,
 				location: s.location,
