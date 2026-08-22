@@ -61,10 +61,16 @@
 
 	function formatPollSummary(summary: NonNullable<typeof pollSummary>) {
 		const parts: string[] = [];
-		parts.push(`Imported ${summary.inserted} draft${summary.inserted === 1 ? '' : 's'}`);
+		if (summary.stillCharging > 0) {
+			parts.push(
+				`${summary.stillCharging} session${summary.stillCharging === 1 ? ' is' : 's are'} still charging — not eligible to import yet`
+			);
+		}
+		parts.push(`imported ${summary.inserted} draft${summary.inserted === 1 ? '' : 's'}`);
 		parts.push(`updated ${summary.updated}`);
 		if (summary.skipped > 0) parts.push(`skipped ${summary.skipped} already imported`);
-		return `${parts.join(', ')}.`;
+		const sentence = parts.join(', ');
+		return `${sentence.charAt(0).toUpperCase()}${sentence.slice(1)}.`;
 	}
 
 	const PAGE_SIZE = 5;

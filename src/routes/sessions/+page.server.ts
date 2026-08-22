@@ -416,6 +416,10 @@ export const actions: Actions = {
 			insertsToApply.push({ ...draft, billingPeriodId });
 		}
 
+		const stillChargingSkips = planResult.skipped.filter(
+			(s) => s.reason === 'still_charging'
+		).length;
+
 		const invalidAfterImportSessions = planResult.skipped
 			.filter((s) => s.reason === 'invalid_after_import' || s.reason === 'zero_energy_after_import')
 			.map((s) => {
@@ -503,6 +507,7 @@ export const actions: Actions = {
 				updated: planResult.update.length,
 				tombstoned: planResult.tombstone.length,
 				skipped: planResult.skipped.length + periodSubmittedInsertSkips,
+				stillCharging: stillChargingSkips,
 				invalidAfterImport: invalidAfterImportSessions
 			}
 		};
