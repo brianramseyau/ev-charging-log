@@ -259,10 +259,16 @@ describe('planImport', () => {
 		expect(result.insert).toEqual([]);
 	});
 
-	it('rule 5: no existing row -> inserts a draft, even mid-charge (kwhUsed null)', () => {
+	it('rule 5: no existing row, still charging (energyKwh null) -> still_charging, not inserted', () => {
 		const result = planImport([payload({ energyKwh: null })], [], [], baseOpts);
+		expect(result.insert).toEqual([]);
+		expect(result.skipped).toEqual([{ externalId: 'evnex-session-1', reason: 'still_charging' }]);
+	});
+
+	it('rule 5b: no existing row, energy figure present -> inserts a draft', () => {
+		const result = planImport([payload({ energyKwh: 5.4 })], [], [], baseOpts);
 		expect(result.insert).toHaveLength(1);
-		expect(result.insert[0]).toMatchObject({ externalId: 'evnex-session-1', kwhUsed: null });
+		expect(result.insert[0]).toMatchObject({ externalId: 'evnex-session-1', kwhUsed: 5.4 });
 	});
 
 	it('rule 6: existing row with kwhUsed already set -> already_complete, never overwritten', () => {

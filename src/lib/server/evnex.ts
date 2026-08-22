@@ -187,7 +187,12 @@ export interface ExistingSessionForImport {
  *    client-side enforcement of `importLookbackDays`, since the real Evnex
  *    sessions endpoint takes no date range (plan §4.4).
  * 4. Already tombstoned -> `dismissed`.
- * 5. No existing row -> insert as a draft (kWh possibly still null).
+ * 5. No existing row, no energy figure yet (still charging) -> `still_charging`,
+ *    NOT inserted. Importing a live session as a draft would immediately hit
+ *    rule 6 (`already_complete`) once it stops being null, since that rule
+ *    only checks the *existing row's* kWh — so the final figure could never
+ *    land. Wait for the session to finish instead.
+ * 5b. No existing row, energy figure present -> insert as a draft.
  * 6. Existing row, kWh already set -> `already_complete` (never overwrite a
  *    user-corrected value).
  * 7. Existing row, kWh null, no energy figure yet -> `still_charging`.
@@ -270,8 +275,17 @@ export function planImport(
 			continue;
 		}
 
-		// Rule 5: new draft.
+		// Rule 5: new draft — but not while the session is still charging
+		// (no energy figure yet). Importing it now would create a draft that
+		// then hits rule 6 (`already_complete`) once it stops being null,
+		// since rule 6 only checks the *existing row's* kWh, not the remote
+		// session's — so the final figure could never land. Wait for the
+		// session to finish instead of importing a partial draft.
 		if (!existingRow) {
+			if (session.energyKwh == null) {
+				skipped.push({ externalId: session.id, reason: 'still_charging' });
+				continue;
+			}
 			insert.push(toDraftSession(session, { timeZone: opts.timeZone, location: opts.location }));
 			continue;
 		}
