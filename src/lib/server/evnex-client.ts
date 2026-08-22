@@ -158,8 +158,11 @@ function asKnownStatus(value: string | null | undefined): EvnexSessionStatus | n
  *
  * Energy is the package's own `sessionEnergyWh` (the authoritative meter-delta
  * figure, watt-hours — divided by 1000 here for this app's kWh field), never the
- * undocumented `totalEnergyUsage` figure; same null-while-charging and
- * zero-is-a-real-reading semantics as before (plan §4.6/§4.7).
+ * undocumented `totalEnergyUsage` figure. `sessionEnergyWh` is null while the
+ * meter has no `meterStop`, and zero is a real reading; on top of that, this
+ * function forces the figure to null while `endDate` is still absent, since a
+ * live session's growing `meterStop` is a partial figure, not a final one (plan
+ * §4.6/§4.7).
  */
 export async function fetchSessions(
 	client: Evnex,
@@ -173,6 +176,16 @@ export async function fetchSessions(
 	}
 
 	return sessions.map((session) => {
+		// A live session has no `endDate` yet — and, contrary to the earlier
+		// assumption that `meterStop` stays absent until charging finishes, Evnex
+		// reports a growing `meterStop` throughout. Trusting the meter delta alone
+		// would import a partial kWh figure that then locks the draft row (rule 6,
+		// "already_complete") so the final figure can never land. `endDate` absent
+		// is the reliable "still charging" signal — it is exactly what
+		// python-evnex's own CLI keys on to label a session "active" — so a session
+		// that has not finished reports no energy figure yet, regardless of what
+		// the live meter happens to say.
+		const stillCharging = session.attributes.endDate == null;
 		const wh = sessionEnergyWh(session);
 		return {
 			id: session.id,
@@ -181,7 +194,7 @@ export async function fetchSessions(
 			// toLocalDateTime (evnex.ts) expects — convert back.
 			startDate: session.attributes.startDate?.toISOString() ?? null,
 			sessionStatus: asKnownStatus(session.attributes.sessionStatus),
-			energyKwh: wh === null ? null : wh / 1000
+			energyKwh: stillCharging || wh === null ? null : wh / 1000
 		};
 	});
 }

@@ -49,10 +49,11 @@ export interface EvnexSessionPayload {
 	 */
 	sessionStatus?: EvnexSessionStatus | null;
 	/**
-	 * Already converted to kWh by `evnex-client.ts`. Null when the session
-	 * has no `transaction` object, or `transaction.meterStop` is absent
-	 * (charging still in progress). `0` is a real, present reading — never
-	 * treat it as falsy/absent (plan §6.5).
+	 * Already converted to kWh by `evnex-client.ts`. Null while the session
+	 * is still charging — either `transaction.meterStop` is absent, or the
+	 * session's `endDate` is still absent (a live session reports a growing
+	 * `meterStop`, which is a partial figure, not a final one). `0` is a real,
+	 * present reading — never treat it as falsy/absent (plan §6.5).
 	 */
 	energyKwh: number | null;
 }
