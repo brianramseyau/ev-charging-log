@@ -45,5 +45,5 @@ data/
 
 # Generated assets — rebuilt from src/theme and src/lib/assets via `npm run assets:generate`
 static/smui/
-static/icons/
+# static/icons/ is tracked (linked from the Unraid template via raw.githubusercontent.com)
 electron/resources/
