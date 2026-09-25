@@ -1,7 +1,7 @@
 // In-memory cache for the Evnex charge-point list, shared between the
 // /settings/charge-points endpoint and the connectEvnex action in
 // /settings' +page.server.ts. Module-level state is fine here: this app is a
-// single-user, single-process, self-hosted deployment (CLAUDE.md), so there's
+// single-user, single-process, self-hosted deployment (AGENTS.md), so there's
 // no multi-instance/serverless concern about the cache being process-local.
 //
 // Only successful fetches are cached — an error result is intentionally never

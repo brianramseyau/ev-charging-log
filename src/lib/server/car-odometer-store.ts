@@ -1,5 +1,5 @@
 // Calls the car-odometer companion and records the outcome on the integration row.
-// Like evnex-token.ts, a deliberate, narrow exception to CLAUDE.md's "only routes
+// Like evnex-token.ts, a deliberate, narrow exception to AGENTS.md's "only routes
 // import $lib/server/db" convention: both car-odometer endpoints (/settings' Test
 // and /sessions' Read from car / auto-fill) must record every call identically —
 // the §7.3 banner, nav dot and paused-calls rule are all driven by what's recorded

@@ -93,7 +93,7 @@ is a consequence of it, not the mechanism.
 
 ### 3.4 This reverses a founding decision, deliberately
 
-PLAN.md §3 and §7, and CLAUDE.md, all state that having no separate API layer
+PLAN.md §3 and §7, and AGENTS.md, all state that having no separate API layer
 is a deliberate choice rather than an omission. That decision was made before
 offline support was a requirement, and offline support is the new information
 that changes it. The reversal is intentional and must be recorded in those
@@ -310,7 +310,7 @@ dedupes on `client_id`.
 `POST /api/sync` accepts `{ operations: [...] }`, applies them in order, and
 returns per-operation `applied | duplicate | rejected(reason)`. Validation lives
 in a pure `src/lib/server/sync.ts` with a co-located test, per the layering
-convention in CLAUDE.md; the route wires it to Drizzle.
+convention in AGENTS.md; the route wires it to Drizzle.
 
 Cost and billing-period assignment are computed **server-side at flush time**
 using the existing `resolveRatePlan` and `findBillingPeriodId`, so a session
@@ -380,7 +380,7 @@ and a discard action.
 - existing `rates.ts` / `sessions.ts` tests must continue to pass unchanged
   through the refactor — they are the regression net for §4
 
-**Playwright**, per the browser-testing requirement in CLAUDE.md:
+**Playwright**, per the browser-testing requirement in AGENTS.md:
 
 - `context.setOffline(true)` → log a session → assert red `cloud_off` and the
   queued entry in the dialog
@@ -428,7 +428,7 @@ since everything else is home-wifi work.
 
 Owed once this lands — these files currently state the opposite of §3:
 
-- **CLAUDE.md** — the "No separate API/backend" section and the layering
+- **AGENTS.md** — the "No separate API/backend" section and the layering
   convention, which both describe `+page.server.ts` as the only place importing
   `$lib/server/db`
 - **PLAN.md §3** — the Framework row of the decisions table

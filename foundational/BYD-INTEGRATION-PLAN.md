@@ -476,7 +476,7 @@ existing `auth_failed` state the same way. Today Evnex only shows that on
 A session whose `odometer_source === 'car'` gets a small car icon beside the
 km figure in the history list, with a tooltip ("Odometer reported by the car
 via Home Assistant"). It's an icon rather than another coloured chip because
-the chip slot already carries kind. Screenshot it in both themes (CLAUDE.md
+the chip slot already carries kind. Screenshot it in both themes (AGENTS.md
 "Browser testing").
 
 ---
@@ -525,7 +525,7 @@ the chip slot already carries kind. Screenshot it in both themes (CLAUDE.md
   (fresh vs. stale), a pre-filled suggestion on a draft, the unreachable
   message, every §7.3 broken state (the banner, the nav dot, the error-state
   buttons, and the banner clearing after a successful Test), the 3-day
-  escalation, and the provenance icon, in light and dark and with CLAUDE.md's
+  escalation, and the provenance icon, in light and dark and with AGENTS.md's
   `en-GB` locale recipe. A dev-only `CAR_ODOMETER_FAKE=1` stub behind the two
   `+server.ts` endpoints serves a fixture response. It's dev-only, and **not**
   a deployment setting.
@@ -565,16 +565,16 @@ Each app phase lands green (`npm run check`, `npm run lint`, `npm run test`).
 
 Owed once this lands:
 
-- **CLAUDE.md, "Key domain logic":** a car-odometer bullet covering the §6.2
+- **AGENTS.md, "Key domain logic":** a car-odometer bullet covering the §6.2
   rule (the car's own timestamp inside the charge window, never HA's recorded
   time), that charging-state sensors are deliberately ignored, the `km`-only
   unit rule, and recorder retention. Also a "do not" note: don't replace the
   companion with a long-lived HA token "to simplify setup". The scoped secret
   is the reason the companion exists (Appendix B).
-- **CLAUDE.md, layering convention:** `car-odometer.ts` (pure),
+- **AGENTS.md, layering convention:** `car-odometer.ts` (pure),
   `car-odometer-client.ts` (impure), and the two new `+server.ts` exceptions
   (`settings/car-odometer`, `sessions/car-odometer`) and why they exist.
-- **CLAUDE.md, "Privacy":** the DB holds the companion secret. It's
+- **AGENTS.md, "Privacy":** the DB holds the companion secret. It's
   low-sensitivity compared to the Evnex refresh token (read-only, odometer
   only), but the same "never log, render, or return" rule applies.
 - **README.md:** a "Car odometer via Home Assistant" section covering what it
