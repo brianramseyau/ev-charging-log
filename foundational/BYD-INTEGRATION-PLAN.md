@@ -1,15 +1,17 @@
-# BYD Odometer Integration (Home Assistant push) — Design & Implementation Plan
+# BYD Odometer Integration (Home Assistant companion) — Design & Implementation Plan
 
 Status: **scoped, not started.** Confirmed: the user already runs the
 [`hass-byd-vehicle`](https://github.com/jkaberg/hass-byd-vehicle) Home Assistant
-integration, and it reads the odometer from this car.
+integration, and it reads the odometer from this car. Approach chosen by the
+user: a small companion Home Assistant integration exposing one narrowly
+scoped, read-only endpoint (§2).
 Branch: `claude/byd-car-km-integration-pd6prj`
 
 Builds on [EVNEX-INTEGRATION-PLAN.md](EVNEX-INTEGRATION-PLAN.md), which already
 made the odometer nullable, added the draft-session flow, and set the pattern
-for an integration configured through `/settings`. See
-[§12](#12-documentation-to-update) for the documentation edits owed once this
-lands.
+for an integration configured through `/settings` that behaves identically on
+every deployment. See [§12](#12-documentation-to-update) for the documentation
+edits owed once this lands.
 
 ---
 
@@ -18,199 +20,171 @@ lands.
 Since the Evnex integration, a home session arrives as a draft that already has
 date, time, kWh and location. The one thing left to type is the **odometer**,
 and the charger has no way to know it. The car does, and the user's Home
-Assistant already collects it every few minutes.
+Assistant already records it every few minutes.
 
 Goal: **fill in the odometer from the car so a home session needs no typing at
-all**, and let a manually-logged public session pick up the latest reading with
-a tap instead of the user reading the dash.
+all**, and let a manually-logged public session fetch the reading with a tap
+instead of the user reading the dash.
 
 Non-goals: anything else the car or Home Assistant exposes. This integration
-receives one number and the time the car reported it.
+reads one number and the time the car reported it.
 
 ## 2. Decisions
 
-| #   | Decision                                                                                                                                                                                                                                                                                                                                                                                                         |
-| --- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 1   | **Home Assistant pushes readings to the app; the app never calls Home Assistant.** An HA automation fires whenever the car reports fresh telemetry and sends `{ km, unit, carReportedAt }` to one endpoint on this app, using HA's built-in `rest_command`. The app holds **no Home Assistant credential at all**. See §4 for why pulling was rejected.                                                          |
-| 2   | **The only credential is a push secret that this app generates.** It can do exactly one thing: add an odometer reading. The app stores only its SHA-256 hash, so it's shown once, at generation. It lives in HA's `secrets.yaml`. If it leaks, the worst an attacker can do is post false odometer readings, and the matching rules in §6.2 would treat any that disagree with neighbouring sessions as suspect. |
-| 3   | **The app keeps its own history of readings** in a `car_odometer_readings` table. Matching a reading to a charge (§6) runs entirely on local data: no network call at match time, and no dependence on how long HA's recorder keeps history.                                                                                                                                                                     |
-| 4   | **A reading is only written to a session automatically when it provably belongs to that session**, meaning the car reported it while that charge was running (§6.2). Anything else pre-fills the odometer field as a suggestion the user confirms. Odometer values end up on the lease report, and a silently wrong value is worse than an empty one.                                                            |
-| 5   | **Works only on the server deployment (Docker/Unraid).** HA can reach a server on the LAN, but not the Electron desktop app, which listens on `127.0.0.1` on a random port and keeps its own database (`electron/main.cjs`). The desktop build hides the feature (§11 #1).                                                                                                                                       |
-| 6   | **No new dependency and no new deployment configuration.** The endpoint is a `+server.ts` route, and the secret is generated in `/settings`.                                                                                                                                                                                                                                                                     |
+| #   | Decision                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| --- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1   | **A companion HA integration, `ev_charging_log`, exposes one read-only endpoint**: `GET /api/ev_charging_log/odometer`. It returns the recorded history of exactly two entities (the odometer and the car's telemetry timestamp), chosen in its setup screen. It has no other endpoints, calls no services, and can't be pointed at any other entity from the request. It lives in its own repo and installs from HACS as a custom repository, the same way the user installed `hass-byd-vehicle`. |
+| 2   | **The only credential is a secret scoped to that endpoint.** The app generates it, the user pastes it into the companion's setup screen once, and HA stores only its SHA-256 hash. If it leaks, the most anyone can do is **read odometer history**. It can't unlock the car, read other entities, or call services. This replaces the unscoped long-lived HA token that an earlier revision of this plan would have needed (Appendix B).                                                          |
+| 3   | **The app pulls; HA never pushes.** That's what makes the **Electron desktop build work the same as the server deployment**: whenever the app runs and can reach HA, it asks for the history it needs. Readings from while the desktop app was closed aren't lost, because HA's recorder already has them (§4.4).                                                                                                                                                                                  |
+| 4   | **The companion is deliberately simple; the logic lives in this app.** The companion checks the secret, reads the recorder, and returns raw state changes. Pairing telemetry with odometer values and deciding what fills a session are pure TypeScript in `src/lib/server/car-odometer.ts`, unit tested like `evnex.ts`. That keeps the Python small (about 150 lines) and rarely touched.                                                                                                        |
+| 5   | **A reading is only written to a session automatically when it provably belongs to that session**, meaning the car reported it while that charge was running (§6.2). Anything else pre-fills the odometer field as a suggestion the user confirms. Odometer values end up on the lease report, and a silently wrong value is worse than an empty one.                                                                                                                                              |
+| 6   | **No new app dependency and no new deployment configuration.** The HA URL and secret are entered in `/settings`, identically on Docker/Unraid and Electron.                                                                                                                                                                                                                                                                                                                                        |
 
 ## 3. What the user does, end to end
 
 One-time setup:
 
-1. Opens `/settings` and finds a new **Car odometer (Home Assistant)** heading
-   below the Evnex one. Enters the two entity IDs from HA (the BYD
-   **Odometer** sensor and its **Telemetry last updated** sensor), which the
-   app only uses to fill in the snippet, and taps **Generate push secret**.
-2. The page shows, **once**, a ready-to-paste block: a `secrets.yaml` line
-   holding the secret, plus the `rest_command` and automation YAML with this
-   app's URL and the two entity IDs already filled in (§5.3). A **Copy**
-   button is next to each. A note warns that the secret won't be shown again,
-   and that generating a new one replaces it.
-3. Pastes the YAML into HA and reloads (or restarts) it.
-4. Back in `/settings`, the status line changes from "Waiting for first
-   reading…" to "Last reading 118,204 km — car reported 4 min ago, received
-   4 min ago" the first time the car reports. That's the setup check: there's
-   no separate Test button, because the app can't ask HA for anything.
+1. In HACS, adds the companion repo as a custom repository, installs **EV
+   Charging Log companion**, and restarts HA.
+2. In the app's `/settings`, under a new **Car odometer (Home Assistant)**
+   heading, enters the HA URL (for example `http://192.168.1.10:8123`) and
+   taps **Generate secret**. The secret is shown with a Copy button.
+3. In HA, goes to Settings → Devices & services → Add integration → **EV
+   Charging Log companion**. Picks the **Odometer** and **Telemetry last
+   updated** sensors (the picker only offers distance and timestamp sensors)
+   and pastes the secret.
+4. Back in the app, taps **Test**. It shows "118,204 km — car reported 6 min
+   ago", which the user can check against the dash. The integration is then
+   switched on and saved.
 
 Day to day:
 
 - **Home, with Evnex:** taps **Pull from charger** on `/sessions` as today.
-  Straight after the import, the same server action runs odometer matching
-  over local readings. Every draft whose charge the car reported during gets
-  its exact odometer and completes. The rest get a **From car** suggestion in
-  their _Add odometer_ field.
-- **Public, or home without Evnex:** in the Add form, taps **Use latest from
-  car** next to the Odometer field. It fills with the most recent reading and
-  a hint showing its age (§7.2). It reads the app's own table, so it's
-  instant and works even if HA is down.
+  Straight after the import, the page asks HA for the odometer history
+  covering the open drafts' charge windows. Every draft whose charge the car
+  reported during gets its exact odometer and completes. The rest get a
+  **From car** suggestion in their _Add odometer_ field.
+- **Public, or home without Evnex:** in the Add form, taps **Read from car**
+  next to the Odometer field. It fills with the current value and a hint
+  showing how old the car's data is.
+- **Desktop app away from home:** if HA can't be reached (no remote URL set
+  up), the buttons show "Home Assistant unreachable" and everything else works
+  as normal. Drafts can be filled when back home, as long as their charges are
+  still within HA's recorder retention (10 days by default).
 
 ---
 
-## 4. Why push, and what was rejected
+## 4. The Home Assistant side
 
-| Option                                                                                   | Why not                                                                                                                                                                                                                                                                        |
-| ---------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| **App pulls from HA's REST API with a long-lived token** (this plan's previous revision) | HA tokens have no scopes. Even a non-admin HA user's token can read every entity and call every service, which with `hass-byd-vehicle` includes unlocking the car. Storing that in a database that's only protected by file permissions, to read two sensors, is a poor trade. |
-| **HA webhook trigger, called by the app**                                                | HA webhooks run an automation and return nothing useful, so the app would still get no data back. They're for pushing _into_ HA, the wrong direction.                                                                                                                          |
-| **A reverse proxy in front of HA that only allows `GET /api/states/<two ids>`**          | It would work, but it adds infrastructure (another container, config, and the real token stored in the proxy) to get what push gives for free.                                                                                                                                 |
-| **MQTT (HA publishes to a broker, the app subscribes)**                                  | It would need a broker, and a long-lived subscriber inside a request/response SvelteKit server. It's more moving parts than a single HTTP POST.                                                                                                                                |
-| **Direct BYD API**                                                                       | See [Appendix A](#appendix-a-the-direct-byd-api-route-not-taken): an obfuscated protocol, a stored plaintext BYD password, and a second BYD account.                                                                                                                           |
-
-What push costs, stated plainly:
-
-- **The app must be reachable from HA**, so this is server deployment only
-  (§2 #5).
-- **Pushes are fire-and-forget.** If the app is down (restarting, updating)
-  when the car reports, that reading is lost. HA's `rest_command` doesn't
-  retry. That's tolerable: the car reports every poll interval (HA's default
-  is 300 s), and a home charge lasts hours, so one missed push almost never
-  empties a charge window. When it does, the draft falls back to a
-  suggestion, which is safe.
-- **"Read from car" means "latest reading HA sent", not a fresh live read.**
-  In practice that's the same thing: HA's own state is only as fresh as its
-  last poll anyway.
-- **Readings from before setup don't exist.** Drafts older than the first push
-  get suggestions at best. There's no backfill from HA history, since that
-  would need the HA token this design exists to avoid.
-
----
-
-## 5. The push contract
-
-### 5.1 What `hass-byd-vehicle` exposes
+### 4.1 What `hass-byd-vehicle` provides
 
 From `custom_components/byd_vehicle/sensor.py` and `translations/en.json`:
 
-| Entity (name in HA)        | Key             | Details                                                                                                                    |
-| -------------------------- | --------------- | -------------------------------------------------------------------------------------------------------------------------- |
-| **Odometer**               | `total_mileage` | `device_class: distance`, `state_class: total_increasing`, native unit `km`, integer-rounded, from the realtime poll.      |
-| **Telemetry last updated** | `last_updated`  | `device_class: timestamp`, diagnostic. Its state is when the car produced the realtime data, as opposed to when HA polled. |
+| Entity (name in HA)        | Key             | Details                                                                                                                      |
+| -------------------------- | --------------- | ---------------------------------------------------------------------------------------------------------------------------- |
+| **Odometer**               | `total_mileage` | `device_class: distance`, `state_class: total_increasing`, native unit `km`, integer-rounded, from the realtime poll.        |
+| **Telemetry last updated** | `last_updated`  | `device_class: timestamp`, diagnostic. Its _state_ is when the car produced the realtime data, as opposed to when HA polled. |
 
-Entity IDs depend on the car's name in HA (something like
-`sensor.sealion_7_odometer`), which is why the user types them in once for the
-snippet.
+HA's default poll interval for `hass-byd-vehicle` is 300 s. The telemetry
+timestamp changes on every car report, including while the car sits on the
+charger with an unchanged odometer. Those unchanged reports during a charge
+are the evidence §6.2 needs, and HA's recorder keeps every one of them.
 
-### 5.2 Endpoint: `POST /api/car-odometer/readings`
+The companion doesn't depend on `hass-byd-vehicle` specifically. Any distance
+sensor in km plus a car-timestamp sensor works.
 
-It lives at `src/routes/api/car-odometer/readings/+server.ts`, next to the
-existing `api/address`.
+### 4.2 The companion integration (`ev_charging_log`)
+
+It lives in its own repo (e.g. `brianramseyau/ha-ev-charging-log`), laid out
+like `hass-byd-vehicle`: `custom_components/ev_charging_log/`, `hacs.json`, and
+the hassfest and HACS validation workflows.
+
+| File             | Contents                                                                                                                                                                                                                                                                                                                                                                              |
+| ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `manifest.json`  | `domain: ev_charging_log`, `config_flow: true`, `dependencies: ["http", "recorder"]`, `iot_class: local_push` (it serves data rather than polling anything), no `requirements`.                                                                                                                                                                                                       |
+| `config_flow.py` | One step: an entity selector for the odometer (filtered to `device_class: distance`), one for the telemetry timestamp (filtered to `device_class: timestamp`), and a password-type field for the secret (at least 32 characters). Stores `sha256(secret)`, never the secret. An **options flow** replaces the secret (rotation) or changes the entities. `single_config_entry: true`. |
+| `__init__.py`    | On setup, registers one `HomeAssistantView`; on unload, marks it inactive. HA can't unregister views, so the view checks for a loaded entry on every request and returns `404` if there isn't one.                                                                                                                                                                                    |
+| `view.py`        | The endpoint, §4.3.                                                                                                                                                                                                                                                                                                                                                                   |
+
+The view sets `requires_auth = False` so that HA's own token isn't required.
+Instead, it checks for `Authorization: Bearer <secret>` and compares
+`sha256(secret)` to the stored hash with `hmac.compare_digest`. On a mismatch
+it calls HA's `process_wrong_login(request)`, so HA's own IP-ban setting
+(`http: ip_ban_enabled`, `login_attempts_threshold`) applies to guessing,
+just as it does for HA's login page.
+
+Reading history uses the recorder's own API off the event loop:
+`get_instance(hass).async_add_executor_job(history.state_changes_during_period, …)`,
+with the start-time state included, for the two configured entity IDs only.
+The entity IDs come from the config entry and never from the request, so a
+leaked secret can't be used to read anything else.
+
+### 4.3 The endpoint: `GET /api/ev_charging_log/odometer`
 
 ```http
-POST /api/car-odometer/readings
-Authorization: Bearer <push secret>
-Content-Type: application/json
-
-{ "km": "118204", "unit": "km", "carReportedAt": "2026-09-24T21:14:03+00:00" }
+GET /api/ev_charging_log/odometer?start=2026-09-21T00:00:00Z&end=2026-09-24T09:00:00Z
+Authorization: Bearer <secret>
 ```
 
-- **Auth:** hash the bearer value with SHA-256 and compare it to the stored
-  hash with `crypto.timingSafeEqual`. A missing or wrong secret gets `401`
-  with an empty body. If no secret has been generated, or the integration is
-  disabled, the response is `404`, so the endpoint doesn't exist until it's
-  switched on.
-- **Validation** is done by a pure function in `car-odometer.ts` (§6.1). `km`
-  can arrive as a string or a number, because HA templates produce strings.
-  It's accepted only if it's finite and `> 0`, so `unavailable`, `unknown`,
-  `0` and `-1` are rejected. `unit` must be exactly `km`: HA can convert
-  units into the display system, and a miles/km mixup on a lease report is
-  worse than a gap. `carReportedAt` must parse as a date and must be no more
-  than 5 minutes in the future (clock skew).
-- **Responses:** `204` when stored; `200 {"ignored": "<reason>"}` for a
-  well-formed but unusable reading (unavailable, wrong unit). It's deliberately
-  not a `4xx`, so HA's logs don't fill with errors every time the car is
-  asleep. `400` means a malformed body.
-- **Idempotent:** a unique index on `car_reported_at` makes a duplicate push
-  (for example, an HA restart re-firing the automation with unchanged state)
-  a no-op instead of a second row.
-- **Updates `lastReceivedAt`** on the integration row for the `/settings`
-  status line, whether the reading was stored or ignored, so "HA is talking to
-  us but the car is asleep" can be told apart from "HA isn't reaching us".
-- **Size limit:** reject bodies over 1 KB before parsing.
-
-The app has no user authentication at all (single user, LAN only; see
-CLAUDE.md), so anyone on the LAN can already edit sessions through the UI.
-The push secret isn't meant to secure the app. It stops the endpoint from
-being a way to feed in readings for anything that can reach the port, which
-matters if the app is ever put behind a reverse proxy or exposed further.
-
-### 5.3 The Home Assistant side (generated in `/settings`)
-
-In `secrets.yaml`:
-
-```yaml
-ev_log_odometer_auth: 'Bearer 3q2+7w…' # generated by the app, shown once
+```json
+{
+	"version": 1,
+	"odometer": {
+		"unit": "km",
+		"changes": [
+			{ "state": "118102", "at": "2026-09-21T00:00:00+00:00" },
+			{ "state": "118204", "at": "2026-09-23T08:41:10+00:00" }
+		]
+	},
+	"telemetry": {
+		"changes": [
+			{ "state": "2026-09-20T22:59:31+00:00", "at": "2026-09-21T00:00:00+00:00" },
+			{ "state": "2026-09-23T08:40:52+00:00", "at": "2026-09-23T08:41:10+00:00" }
+		]
+	},
+	"oldestRecorded": "2026-09-14T03:00:00+00:00"
+}
 ```
 
-In `configuration.yaml`:
+- `start` and `end` are optional. By default `end` is now and `start` equals
+  `end`, which returns just the current state for **Read from car**. The
+  window is capped at 31 days, and `start` must be before `end`. Anything else
+  gets a `400`.
+- The first entry in each `changes` array is the state in effect at `start`,
+  with `at` clamped to `start`. That's how the recorder reports the
+  start-time state, and it's what the app needs for "what did the odometer
+  read at plug-in?".
+- `state` is passed through verbatim, including `unavailable`/`unknown`. The
+  app decides what's usable (§6.1), not the companion.
+- `unit` is the odometer entity's current `unit_of_measurement`.
+- `oldestRecorded` tells the app where history runs out, so it can say "too
+  old to look up" instead of "no data".
+- `version` lets the app detect an incompatible companion and show "update
+  the companion" rather than misreading the response.
+- Every response sets `Cache-Control: no-store`. A `401` has an empty body.
+  If no entry is configured, the response is `404`.
 
-```yaml
-rest_command:
-  ev_log_odometer:
-    url: 'http://<app host>:<port>/api/car-odometer/readings'
-    method: post
-    headers:
-      authorization: !secret ev_log_odometer_auth
-    content_type: 'application/json'
-    payload: >-
-      {"km": {{ states('sensor.sealion_7_odometer') | tojson }},
-       "unit": {{ state_attr('sensor.sealion_7_odometer', 'unit_of_measurement') | tojson }},
-       "carReportedAt": {{ states('sensor.sealion_7_telemetry_last_updated') | tojson }}}
-```
+### 4.4 Recorder retention and exclusions
 
-The automation (in `automations.yaml`, or through the UI in YAML mode):
+The recorder keeps 10 days of history by default (`purge_keep_days`). The
+Evnex lookback defaults to 3 days, so an ordinary flow is well inside that. A
+draft whose charge has aged out gets `skip`, reason `too_old` (§6.2). If the
+user has excluded either entity from the recorder, `changes` comes back empty.
+The companion's config flow warns about that at setup time, by checking the
+recorder's entity filter.
 
-```yaml
-- alias: 'EV charging log: push odometer'
-  mode: queued
-  triggers:
-    - trigger: state
-      entity_id: sensor.sealion_7_telemetry_last_updated
-  conditions:
-    - condition: template
-      value_template: "{{ states('sensor.sealion_7_odometer') | is_number }}"
-  actions:
-    - action: rest_command.ev_log_odometer
-```
+### 4.5 Maintaining the companion
 
-- The trigger is the **telemetry timestamp**, not the odometer. It changes
-  every time the car reports, including while it sits on the charger with an
-  unchanged odometer. Those unchanged readings during a charge are exactly
-  the evidence §6.2 needs. A trigger on the odometer would only fire while
-  driving, and would never produce a reading inside a charge window.
-- `<app host>:<port>` is filled in from the request's origin when the snippet
-  is generated, with an editable field in case HA reaches the app by a
-  different address than the browser does (Docker networking).
-- The syntax is the current HA form (`triggers:`/`trigger:`,
-  `actions:`/`action:`). Phase 0 checks it against the user's HA version.
-- **Volume:** one reading per poll, about 288 a day at HA's 300 s default,
-  which is around 100k small rows a year. §5.4 prunes old ones.
+It's a second codebase, but a small one. The HA internals it touches (views,
+config flows, the recorder history API) are the same ones HA's own core
+integrations use, so they change rarely and with deprecation warnings.
+`hacs.json` pins a minimum HA version, and the CI runs hassfest plus
+`pytest-homeassistant-custom-component` tests against current HA. Expect to
+bump it a few times a year.
 
-### 5.4 Data model
+---
+
+## 5. App data model
 
 New table **`car_odometer_integration`**, a single row following the same
 pattern as `evnex_integration`:
@@ -218,30 +192,19 @@ pattern as `evnex_integration`:
 ```ts
 export const carOdometerIntegration = sqliteTable('car_odometer_integration', {
 	id: integer('id').primaryKey({ autoIncrement: true }),
+	baseUrl: text('base_url'), // e.g. http://192.168.1.10:8123, no trailing slash
+	secret: text('secret'), // companion secret; scoped to reading odometer history (§8)
 	enabled: integer('enabled', { mode: 'boolean' }).notNull().default(false),
-	pushSecretHash: text('push_secret_hash'), // SHA-256 hex. The secret itself is never stored.
-	odometerEntityId: text('odometer_entity_id'), // only used to render the HA snippet
-	telemetryEntityId: text('telemetry_entity_id'), // likewise
-	lastReceivedAt: text('last_received_at'), // any push, stored or ignored
-	lastIgnoredReason: text('last_ignored_reason')
+	lastReadAt: text('last_read_at'),
+	lastReadStatus: text('last_read_status', {
+		enum: ['ok', 'auth_failed', 'unreachable', 'companion_missing', 'companion_outdated', 'no_data']
+	}),
+	lastReadError: text('last_read_error')
 });
 ```
 
-New table **`car_odometer_readings`**:
-
-```ts
-export const carOdometerReadings = sqliteTable('car_odometer_readings', {
-	id: integer('id').primaryKey({ autoIncrement: true }),
-	km: real('km').notNull(),
-	carReportedAt: text('car_reported_at').notNull().unique(), // ISO UTC; the car's timestamp
-	receivedAt: text('received_at').notNull() // ISO UTC; when the push arrived
-});
-```
-
-Pruning: on each insert, delete readings older than 90 days, except that the
-latest reading is always kept. Charge matching only ever looks back as far
-as the Evnex lookback window, so 90 days is generous. It's a constant, not a
-setting.
+There's no readings table. The recorder is the history, and the app asks for
+exactly the windows it needs.
 
 **`charging_sessions`** gets two changes:
 
@@ -259,24 +222,35 @@ setting.
    draft gets them on its next poll, through a small `planImport` addition
    alongside the existing kWh-update path.
 
-All four schema changes are new tables or plain `ADD COLUMN`s, so there's no
-table rebuild and the foreign-key caveat in `db/index.ts` doesn't come into
-play.
+All three changes are a new table or plain `ADD COLUMN`s, so there's no table
+rebuild and the foreign-key caveat in `db/index.ts` doesn't come into play.
 
 ---
 
 ## 6. Matching logic: `src/lib/server/car-odometer.ts`
 
 This is pure and dependency-free, like `evnex.ts`, with a co-located
-`car-odometer.test.ts`. The route files handle the DB reads and writes.
+`car-odometer.test.ts`. The impure edge, `car-odometer-client.ts`, is one
+`fetch` with a 5 s timeout plus response-shape checks.
 
-### 6.1 `parseReading(body)`
+### 6.1 `toReadings(response)`: pairing the two histories
 
-This is the validation from §5.2. It returns
-`{ ok: true, reading: { km, carReportedAt } } | { ok: false, status: 400 | 200, reason }`,
-so the endpoint is a thin wrapper around a function that's fully tested.
+This turns the companion's two change lists into
+`{ km: number; carReportedAt: string }[]`, one reading per telemetry change:
 
-### 6.2 `planOdometerFill(drafts, readings, neighbours)`
+- `carReportedAt` is the telemetry change's **state** (the car's timestamp),
+  not its `at` (when HA recorded it). HA can re-poll and record the same stale
+  cloud data while the car is asleep. Only the car's own timestamp says when
+  the car was in that state.
+- `km` is the odometer state in effect at that telemetry change's `at`.
+- A reading is dropped if either state is unusable. The `km` value must parse
+  as a finite number `> 0`, so `unavailable`, `unknown`, `0` and `-1` are out.
+  The `unit` must be exactly `km`: HA can convert units into the display
+  system, and a miles/km mixup on a lease report is worse than a gap.
+- Duplicate `carReportedAt` values (the same report recorded twice) collapse
+  to one reading.
+
+### 6.2 `planOdometerFill(drafts, readings, neighbours, oldestRecorded)`
 
 The car can't move while it's charging. So a reading the car reported inside
 a charge's `[startedAt, endedAt]` is exactly that session's plug-in odometer.
@@ -285,21 +259,20 @@ a charge's `[startedAt, endedAt]` is exactly that session's plug-in odometer.
 | --------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `fill`    | At least one reading has `carReportedAt` inside `[startedAt, endedAt]` (a still-charging session counts as `endedAt = now`), **and** every reading inside the window has the same `km` (the car didn't move), **and** it passes `isOdometerBelowLastRecorded` against the session's neighbours. Written with `odometer_source = 'car'`. |
 | `suggest` | No reading inside the window, but there's a reading at or before `startedAt` (the latest such one) that passes the neighbour check. The value is pre-filled in the draft's input with the hint _"From car — not confirmed during this charge"_, and is never saved without the user tapping it.                                         |
-| `skip`    | No usable reading: before the first push ever arrived, readings that disagree inside the window, or a value below the previous session's odometer.                                                                                                                                                                                      |
-
-The timestamps compared are **`carReportedAt`**, never `receivedAt`. A push
-can arrive late, or be replayed after an HA restart. Only the car's own
-timestamp says when the car was in that state.
+| `skip`    | `too_old` (the window starts before `oldestRecorded`), `no_data`, `inconsistent` (readings disagree inside the window), or `below_previous`.                                                                                                                                                                                            |
 
 Deliberately **not** used as evidence: the BYD charging-state sensors. `pyBYD`
 itself notes that the "gun connected" value "does not change when the
 charging gun is disconnected". Timestamps and odometer ordering are the only
 evidence the rule uses.
 
-### 6.3 `latestReading(readings, now)`
+### 6.3 One request per pull
 
-This backs **Use latest from car**. It returns `{ km, carReportedAt, ageMinutes }`,
-and the page decides how to show the age (§7.2).
+Before calling the companion, the app computes a single `[start, end]` that
+covers every open imported draft: from the earliest `startedAt`, clamped to
+31 days back, until now. It makes one request and matches every draft
+locally. **Read from car** makes a separate request with no `start`, so it
+gets just the current state.
 
 ---
 
@@ -307,37 +280,47 @@ and the page decides how to show the age (§7.2).
 
 ### 7.1 `/settings`: "Car odometer (Home Assistant)" heading
 
-- Hidden entirely in the Electron build (§2 #5), with a one-line note
-  explaining why.
-- **Not set up:** the two entity ID fields, the app URL (prefilled), and
-  **Generate push secret**.
-- **Just generated:** the three YAML blocks from §5.3 with **Copy** buttons,
-  and a "shown once" warning.
-- **Set up:** the enabled switch, the status line ("Last reading 118,204 km —
-  car reported 4 min ago, received 4 min ago", or "No readings yet", or "Last
-  push ignored: car unavailable 2 h ago"), **Regenerate secret** (behind a
-  confirm dialog, since it breaks HA until the new YAML is pasted), and
-  **Show HA snippet again** (entity IDs and URL only, with the secret line
-  shown as `<your existing secret>`).
+- **Not set up:** the HA URL field, **Generate secret** (showing the secret
+  with a Copy button and a link to the companion's install instructions), and
+  **Test**.
+- **Set up:** the enabled switch, the last-read status line, **Test**, and
+  **Rotate secret**. Rotating generates a new secret and shows it for pasting
+  into the companion's options flow; the old one stops working as soon as HA
+  saves the new one. Once saved, the secret is masked. It's needed for every
+  request, so it can't be write-only the way the Evnex password is, but it's
+  never shown again after setup.
+- **Errors**, each with a specific message: `401` means "secret doesn't match —
+  paste it again in HA"; `404` means the companion isn't installed or
+  configured; a `version` mismatch means "update the companion"; a timeout
+  means HA is unreachable. A self-signed certificate on HA also shows up as a
+  connection error: there's no "skip TLS verification" switch.
+
+**Test** calls `src/routes/settings/car-odometer/+server.ts` with `fetch`
+rather than running in `load`, for the same reason as `charge-points/+server.ts`:
+a network dependency mustn't block page render.
 
 ### 7.2 `/sessions`
 
-- **Add form:** a small **Use latest from car** icon button next to the
-  Odometer field, shown only when readings exist. It fills the field from the
-  `load` data (no request, since it's local), with the hint _"From car,
-  reported 3 min ago."_ If the reading is more than 30 minutes old, the hint
-  becomes a warning: _"Car last reported 2 days ago — check this matches the
-  dash."_ The saved row gets `odometer_source = 'car'` only if the submitted
-  value still equals the suggested one; otherwise the user edited it, and it
-  counts as `manual`. The existing below-last-recorded warning still applies.
-- **Pull from charger:** the `?/pollEvnex` action runs `planOdometerFill` over
-  all open imported drafts straight after the import, in the same request.
-  That's safe to do now because it's local and can't fail on a network call.
-  It writes the `fill`s and returns the `suggest`ions to pre-fill. The result
-  message gains "…N odometers filled from car".
+- **Add form:** a small **Read from car** icon button next to the Odometer
+  field, shown when the integration is enabled. It calls
+  `src/routes/sessions/car-odometer/+server.ts`, fills the field, and shows
+  _"From car, reported 3 min ago."_ If the car's data is more than 30 minutes
+  old, the hint becomes a warning: _"Car last reported 2 days ago — check this
+  matches the dash."_ The saved row gets `odometer_source = 'car'` only if the
+  submitted value still equals the fetched one; otherwise the user edited it,
+  and it counts as `manual`. The existing below-last-recorded warning still
+  applies.
+- **Pull from charger:** after the Evnex form action returns, the page posts
+  to the same endpoint with `?apply=1`. The server runs §6.3, writes the
+  `fill`s, and returns the `suggest`ions to pre-fill. The two stay as separate
+  requests so that HA being unreachable (the desktop app away from home)
+  never delays or fails an Evnex import. The result message gains "…N
+  odometers filled from car", or "Home Assistant unreachable — odometers not
+  filled".
 - **Draft rows:** suggestions show pre-filled in _Add odometer_ with their
-  hint. Drafts without `started_at` (manual ones) get the same **Use latest
-  from car** button as the Add form.
+  hint. Each draft also gets a **Read from car** button. It runs the history
+  rule for that one draft when the draft has `started_at`, and reads the
+  current value otherwise.
 
 ### 7.3 Provenance icon
 
@@ -351,73 +334,77 @@ the chip slot already carries kind. Screenshot it in both themes (CLAUDE.md
 
 ## 8. Security summary
 
-- **No Home Assistant credential is stored anywhere in this app.**
-- **The push secret** is 32 random bytes (`crypto.randomBytes`), base64url.
-  It's shown once, stored as a SHA-256 hash, compared in constant time, and
-  never logged. Request logging must not record the `Authorization` header.
-  Its blast radius is false odometer readings, which the neighbour check
-  in §6.2 limits, and which never become a `fill` unless they're consistent
-  inside a real charge window.
-- **What HA learns about the app:** one URL. **What the app learns about HA:**
-  two sensor values per poll. There's no location, and no VIN (the payload
-  template doesn't include it).
-- **Transport:** plain `http://` on the LAN, the same as the rest of the app
-  today. If the app is ever exposed beyond the LAN, the secret is what
-  protects this endpoint, and TLS becomes the reverse proxy's job.
+| Credential       | Where it lives                                                           | What a leak allows                                                                                                                                                                    |
+| ---------------- | ------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Companion secret | Plaintext in the app DB (it has to be sent); only its SHA-256 hash in HA | Reading the odometer and car-report timestamps, within recorder retention. That reveals when the car moved and how far, but nothing else: no location, no other entities, no control. |
+| HA token         | **Nowhere.** None is created.                                            | n/a                                                                                                                                                                                   |
+
+- The secret is 32 random bytes (`crypto.randomBytes`), base64url. It's never
+  returned by a `load` function or rendered after setup, and never logged,
+  including in error messages from a failed `fetch`.
+- Guessing is rate-limited by HA's own IP-ban mechanism (§4.2).
+- It's sent as a header, over plain `http://` on the LAN (as with the rest of
+  the app today) or over the user's HTTPS remote URL. If HA is exposed to the
+  internet (for example through Nabu Casa), the endpoint is too, protected by
+  the secret and the IP ban. That's the same as HA's own login page, with a
+  far smaller blast radius behind it.
 
 ---
 
 ## 9. Testing
 
+- **The companion repo:** `pytest-homeassistant-custom-component` tests for
+  the config flow (only the hash is stored; entity filters), `401` with a bad
+  or missing secret, `404` with no entry, requests that try to name another
+  entity (ignored), the 31-day window cap, and a history response built from
+  states written in the test. hassfest and HACS validation run in CI.
 - **`car-odometer.test.ts`:**
-  - `parseReading`: string and number `km`, `unavailable`/`unknown`/`0`/`-1`,
-    a non-km unit, a missing field, a bad timestamp, a timestamp too far in
-    the future, and an oversized body.
+  - `toReadings`: pairing (the odometer changes before, at, and after a
+    telemetry change); `unavailable`/`unknown`/`0`/`-1`; a non-km unit;
+    duplicate reports; and a telemetry `at` inside a window while its _state_
+    is outside it (a stale re-poll).
   - `planOdometerFill`, the whole §6.2 table: a reading exactly on each window
-    boundary and one second either side; a reading _received_ inside the
-    window but _reported_ outside it (a late push must not `fill`);
-    disagreeing readings inside a window; a still-charging window; no readings
-    at all; a value below the previous session's odometer; several drafts
-    sharing one run of readings; and a window spanning a DST change (instants
-    only).
-- **The endpoint:** a small Vitest test that calls the `+server.ts` handler
-  with a `Request` (401 on a bad secret, 404 when disabled, 204 then a
-  no-op on a duplicate).
+    boundary and one second either side; readings disagreeing inside a
+    window; a still-charging window; `too_old` against `oldestRecorded`; a
+    value below the previous session's odometer; several drafts sharing one
+    response; and a window spanning a DST change (instants only).
+  - The `version` check and response-shape validation.
 - **`evnex.test.ts`:** `planImport` cases for the `startedAt`/`endedAt`
   pass-through and the backfill-on-existing-draft path.
-- **Playwright:** the settings card in all states (including the one-time
-  snippet), the Use latest from car hint (fresh vs. stale), a pre-filled
-  suggestion on a draft, and the provenance icon, in light and dark and with
-  CLAUDE.md's `en-GB` locale recipe. Seed readings with `curl` against the
-  dev server, since the endpoint is the only way in. No fake HA is needed.
+- **Playwright:** the settings card in all states, the Read from car hint
+  (fresh vs. stale), a pre-filled suggestion on a draft, the unreachable
+  message, and the provenance icon, in light and dark and with CLAUDE.md's
+  `en-GB` locale recipe. A dev-only `CAR_ODOMETER_FAKE=1` stub behind the two
+  `+server.ts` endpoints serves a fixture response. It's dev-only, and **not**
+  a deployment setting.
 
 ---
 
 ## 10. Phasing
 
-Each phase lands green (`npm run check`, `npm run lint`, `npm run test`).
+Each app phase lands green (`npm run check`, `npm run lint`, `npm run test`).
 
-| #   | Phase                                                                                                  | Notes                                                                                                                                                                                                                                                                                                                               |
-| --- | ------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 0   | **Check the HA side by hand** (about 15 minutes, no app code)                                          | Point the §5.3 `rest_command` at `https://webhook.site` or a `nc -l` on the LAN for a day. That confirms the entity IDs, the telemetry timestamp format, that the automation syntax works on the user's HA version, and that an overnight charge produces several unchanged readings inside its window at the user's poll interval. |
-| 1   | Schema: the two new tables, `odometer_source`, `started_at`/`ended_at` + the `planImport` pass-through | Migration only, plus the Evnex import populating the instants from then on.                                                                                                                                                                                                                                                         |
-| 2   | `car-odometer.ts` pure logic + full Vitest suite                                                       | No network, no UI.                                                                                                                                                                                                                                                                                                                  |
-| 3   | The push endpoint + the `/settings` card (secret generation, snippet, status line)                     | Ends with real readings arriving from the user's HA.                                                                                                                                                                                                                                                                                |
-| 4   | **Use latest from car** in the Add form and on manual draft rows                                       | The first payoff, and useful for public sessions even without Evnex.                                                                                                                                                                                                                                                                |
-| 5   | Auto-fill inside **Pull from charger** + provenance icon                                               | The main payoff: a home session goes from charger to complete with no typing.                                                                                                                                                                                                                                                       |
-| 6   | Playwright verification + §12 documentation                                                            |                                                                                                                                                                                                                                                                                                                                     |
+| #   | Phase                                                                                                              | Notes                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| --- | ------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 0   | **Capture a real history by hand** (about 15 minutes, no code)                                                     | Using the user's own browser session or a temporary token that's deleted right after, `curl` HA's built-in `/api/history/period` for the two entities over a recent overnight charge. This confirms the entity IDs, the telemetry timestamp format, and that the charge window contains several unchanged odometer readings at the user's poll interval. The redacted output becomes the fixture for both repos. The temporary token never goes near the app. |
+| 1   | **The companion integration** (its own repo)                                                                       | View, config flow, options flow, tests, HACS metadata. Ends with the user installing it from HACS and `curl`-ing the endpoint with the secret.                                                                                                                                                                                                                                                                                                                |
+| 2   | App schema: `car_odometer_integration`, `odometer_source`, `started_at`/`ended_at` + the `planImport` pass-through | Migration only, plus the Evnex import populating the instants from then on.                                                                                                                                                                                                                                                                                                                                                                                   |
+| 3   | `car-odometer.ts` pure logic + full Vitest suite                                                                   | No network, no UI. It can run in parallel with Phase 1, using the Phase 0 fixture.                                                                                                                                                                                                                                                                                                                                                                            |
+| 4   | `car-odometer-client.ts` + the `/settings` card + Test                                                             | First real contact with the companion.                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| 5   | **Read from car** in the Add form and on draft rows                                                                | The first payoff, and useful for public sessions even without Evnex.                                                                                                                                                                                                                                                                                                                                                                                          |
+| 6   | Auto-fill after **Pull from charger** + provenance icon                                                            | The main payoff: a home session goes from charger to complete with no typing.                                                                                                                                                                                                                                                                                                                                                                                 |
+| 7   | Playwright verification (server and Electron builds) + §12 documentation                                           |                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
 
 ---
 
 ## 11. Open decisions
 
-| #   | Question                                                                    | Default if unanswered                                                                                                  |
-| --- | --------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
-| 1   | **The Electron build gets no car readings.** Acceptable?                    | **Yes.** The server deployment is the primary one. The desktop build hides the feature rather than half-supporting it. |
-| 2   | **How long to keep readings?**                                              | **90 days**, with the latest always kept.                                                                              |
-| 3   | **Auto-fill on every Pull from charger, or only behind a separate button?** | **Automatically.** A `fill` is proven exact (§6.2), and a second button would be a step that's always pressed.         |
-| 4   | **How stale can "Use latest from car" be before it warns?**                 | **30 minutes**, as a constant. Tune it after a billing period of use.                                                  |
-| 5   | **Fill `settings.vehicleLabel` from the car?**                              | **No.** Never write report-identity settings automatically, and the push doesn't carry the VIN anyway.                 |
+| #   | Question                                                                                | Default if unanswered                                                                                          |
+| --- | --------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------- |
+| 1   | **Auto-fill after every Pull from charger, or only behind a separate button?**          | **Automatically.** A `fill` is proven exact (§6.2), and a second button would be a step that's always pressed. |
+| 2   | **How stale can "Read from car" be before it warns?**                                   | **30 minutes**, as a constant. Tune it after a billing period of use.                                          |
+| 3   | **Publish the companion to the default HACS store, or keep it as a custom repository?** | **Custom repository.** It's built for this app. Publishing brings review requirements and users to support.    |
+| 4   | **Fill `settings.vehicleLabel` from the car?**                                          | **No.** Never write report-identity settings automatically, and the endpoint doesn't return the VIN anyway.    |
 
 ---
 
@@ -425,21 +412,23 @@ Each phase lands green (`npm run check`, `npm run lint`, `npm run test`).
 
 Owed once this lands:
 
-- **CLAUDE.md, "Key domain logic":** a car-odometer bullet covering push-only
-  (the app never calls HA, and this is deliberate; don't "simplify" it into a
-  pull with an HA token), the §6.2 rule (the car's `carReportedAt` inside the
-  charge window, never `receivedAt`), that charging-state sensors are
-  deliberately ignored, and the `km`-only unit rule.
-- **CLAUDE.md, layering convention:** `car-odometer.ts` (pure), and the
-  `api/car-odometer/readings/+server.ts` endpoint as the one route that
-  accepts requests from outside the browser.
-- **CLAUDE.md, "Privacy":** the DB holds a hash of the push secret (never the
-  secret) and a 90-day odometer history.
+- **CLAUDE.md, "Key domain logic":** a car-odometer bullet covering the §6.2
+  rule (the car's own timestamp inside the charge window, never HA's recorded
+  time), that charging-state sensors are deliberately ignored, the `km`-only
+  unit rule, and recorder retention. Also a "do not" note: don't replace the
+  companion with a long-lived HA token "to simplify setup". The scoped secret
+  is the reason the companion exists (Appendix B).
+- **CLAUDE.md, layering convention:** `car-odometer.ts` (pure),
+  `car-odometer-client.ts` (impure), and the two new `+server.ts` exceptions
+  (`settings/car-odometer`, `sessions/car-odometer`) and why they exist.
+- **CLAUDE.md, "Privacy":** the DB holds the companion secret. It's
+  low-sensitivity compared to the Evnex refresh token (read-only, odometer
+  only), but the same "never log, render, or return" rule applies.
 - **README.md:** a "Car odometer via Home Assistant" section covering what it
-  needs (`hass-byd-vehicle`, or any HA odometer plus a car-timestamp sensor in
-  km), the `/settings` snippet flow, and that it's server-deployment only.
-- **No deployment-config changes.** `.env.example`, the `Dockerfile` and the
-  Unraid template are untouched.
+  needs (`hass-byd-vehicle`, or any km odometer plus a car-timestamp sensor),
+  a link to the companion repo, and the setup flow.
+- **No deployment-config changes.** `.env.example`, the `Dockerfile`, the
+  Unraid template and Electron's `config.json` are untouched.
 
 ---
 
@@ -484,3 +473,14 @@ encryToken}`. **There's no refresh token.** Session-expired codes
   port with golden test vectors generated from pyBYD), a stored BYD password,
   and eventually a background sampler to get readings during charges. That's
   several times the work of this plan, for the same number.
+
+## Appendix B: Home Assistant approaches considered
+
+| Option                                                                       | Outcome                                                                                                                                                                                                                                                                                     |
+| ---------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **App pulls from HA's REST API with a long-lived token**                     | Rejected. HA tokens have no scopes: even a non-admin HA user's token can read every entity and call every service, which with `hass-byd-vehicle` includes unlocking the car. That's too much to store for reading two sensors.                                                              |
+| **HA pushes to the app** (automation + `rest_command` to an app endpoint)    | Rejected. It has no HA credential and needs no custom code, but the desktop app is only running while it's open and listens on `127.0.0.1` on a random port (`electron/main.cjs`), so HA can't reach it and would miss overnight charges anyway. The Electron build would lose the feature. |
+| **MQTT** (HA publishes, the app subscribes with a topic-scoped broker login) | A viable runner-up. It works with the desktop app too, because the broker queues messages while the app is closed. But it needs a broker with access rules, a long-lived subscriber inside the app, and queue limits tuned so a few days offline doesn't drop readings.                     |
+| **A readings file in HA's `/local/` folder under a random path**             | Rejected. `/local/` is served without authentication, so the path is the only protection, and it's exposed to the internet whenever HA is.                                                                                                                                                  |
+| **An HA webhook trigger**                                                    | Not applicable. Webhooks push data _into_ HA and return nothing useful to the caller.                                                                                                                                                                                                       |
+| **Companion integration with a scoped secret**                               | **Chosen** (§2).                                                                                                                                                                                                                                                                            |
