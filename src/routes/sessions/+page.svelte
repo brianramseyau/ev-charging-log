@@ -1,13 +1,31 @@
 <script lang="ts">
 	import { enhance } from '$app/forms';
+	import { invalidateAll } from '$app/navigation';
 	import { resolve } from '$app/paths';
 	import { untrack } from 'svelte';
 	import Button, { Label } from '@smui/button';
 	import Card, { Content } from '@smui/card';
 	import IconButton from '@smui/icon-button';
 	import Textfield from '@smui/textfield';
-	import { mdiCloudDownloadOutline, mdiDeleteOutline, mdiHome, mdiEvStation } from '@mdi/js';
+	import {
+		mdiCar,
+		mdiCloudDownloadOutline,
+		mdiDeleteOutline,
+		mdiHome,
+		mdiEvStation
+	} from '@mdi/js';
 	import AddressField from '$lib/components/AddressField.svelte';
+	import CarHintLine from '$lib/components/CarHint.svelte';
+	import IntegrationAlertBanner from '$lib/components/IntegrationAlertBanner.svelte';
+	import ReadFromCarButton from '$lib/components/ReadFromCarButton.svelte';
+	import {
+		applyCarOdometer,
+		errorHint,
+		hintFor,
+		isBrokenStatusName,
+		type CarHint,
+		type CarReadResult
+	} from '$lib/car-reading';
 	import DateTimeField from '$lib/components/DateTimeField.svelte';
 	import Icon from '$lib/components/Icon.svelte';
 	import type { ActionData, PageData } from './$types';
@@ -56,6 +74,97 @@
 	let polling = $state(false);
 	let showForm = $state(false);
 
+	// --- Car odometer (BYD-INTEGRATION-PLAN.md §7.2, §7.3) ---
+	// The alert comes from the root layout's load: it's what the nav dot reads too.
+	const carAlert = $derived(data.carOdometerAlert ?? null);
+
+	// The Add form's Read from car: the value fetched, so the server can tell whether
+	// the submitted odometer is still the car's (source 'car') or was edited.
+	let odometerFromCar = $state('');
+	let addHint = $state<CarHint | null>(null);
+	// Only while the field still holds what the car reported (or for an error).
+	const addHintVisible = $derived(
+		addHint != null && (addHint.tone === 'error' || String(odometerKm) === odometerFromCar)
+	);
+
+	function onAddRead(result: CarReadResult) {
+		if (result.ok) {
+			odometerKm = String(result.km);
+			odometerFromCar = String(result.km);
+			addHint = hintFor(result, new Date());
+		} else {
+			addHint = errorHint(result);
+			// A failure may have just recorded a broken status: refresh the banner/nav dot.
+			void invalidateAll();
+		}
+	}
+
+	// Draft rows: odometer inputs are controlled so a suggestion can pre-fill them.
+	let draftOdometers = $state<Record<number, number | null | undefined>>({});
+	let draftFromCar = $state<Record<number, number>>({});
+	let draftHints = $state<Record<number, CarHint>>({});
+
+	function draftHintVisible(id: number) {
+		const hint = draftHints[id];
+		return hint != null && (hint.tone === 'error' || draftOdometers[id] === draftFromCar[id]);
+	}
+
+	function onDraftRead(id: number, result: CarReadResult) {
+		if (result.ok) {
+			draftOdometers[id] = result.km;
+			draftFromCar[id] = result.km;
+			draftHints[id] = hintFor(result, new Date());
+		} else {
+			draftHints[id] = errorHint(result);
+			void invalidateAll();
+		}
+	}
+
+	// The auto-fill that runs straight after Pull from charger: a separate request,
+	// so Home Assistant being slow or down never delays or fails the Evnex import.
+	let carFillRunning = $state(false);
+	let carFill = $state<CarHint | null>(null);
+
+	async function runCarFill() {
+		carFillRunning = true;
+		const result = await applyCarOdometer();
+		carFillRunning = false;
+
+		if (result.ok) {
+			for (const s of result.suggestions) {
+				draftOdometers[s.id] = s.km;
+				draftFromCar[s.id] = s.km;
+				draftHints[s.id] = {
+					tone: 'warning',
+					text: 'From car — not confirmed during this charge.'
+				};
+			}
+			const parts: string[] = [];
+			if (result.filled > 0) {
+				parts.push(`${result.filled} odometer${result.filled === 1 ? '' : 's'} filled from car`);
+			}
+			if (result.suggestions.length > 0) {
+				parts.push(
+					`${result.suggestions.length} suggested from car — check ${result.suggestions.length === 1 ? 'it' : 'them'} and tap Complete`
+				);
+			}
+			if (parts.length === 0 && result.skipped > 0) {
+				parts.push("the car couldn't confirm any odometers — add them by hand");
+			}
+			carFill =
+				parts.length > 0
+					? { tone: 'ok', text: `${parts.join('; ').replace(/^\w/, (c) => c.toUpperCase())}.` }
+					: null;
+		} else if (result.status === 'disabled') {
+			carFill = null;
+		} else if (result.broken || isBrokenStatusName(result.status)) {
+			carFill = { tone: 'error', text: `Odometers not filled: ${result.message}`, fix: true };
+		} else {
+			carFill = { tone: 'warning', text: 'Home Assistant unreachable — odometers not filled.' };
+		}
+		await invalidateAll();
+	}
+
 	const pollSummary = $derived(form?.pollSummary ?? null);
 	const pollError = $derived(form?.pollError ?? null);
 
@@ -100,6 +209,7 @@
 			time = form.values.time ?? '';
 			odometerKm = form.values.odometerKm ?? '';
 			kwhUsed = form.values.kwhUsed ?? '';
+			odometerFromCar = form.values.odometerFromCar ?? '';
 			location = form.values.location ?? '';
 			notes = form.values.notes ?? '';
 		}
@@ -110,6 +220,8 @@
 		date = currentDate();
 		time = currentTime();
 		odometerKm = '';
+		odometerFromCar = '';
+		addHint = null;
 		kwhUsed = '';
 		location = homeAddress;
 		notes = '';
@@ -147,9 +259,11 @@
 		action="?/pollEvnex"
 		use:enhance={() => {
 			polling = true;
-			return async ({ update }) => {
+			carFill = null;
+			return async ({ result, update }) => {
 				polling = false;
 				await update();
+				if (result.type === 'success' && data.carOdometerEnabled) await runCarFill();
 			};
 		}}
 	>
@@ -191,6 +305,11 @@
 {/if}
 {#if pollError}
 	<p class="field-error">{pollError}</p>
+{/if}
+{#if carFillRunning}
+	<p class="save-feedback__note">Reading odometers from the car…</p>
+{:else if carFill}
+	<CarHintLine hint={carFill} />
 {/if}
 
 {#if showForm}
@@ -253,19 +372,29 @@
 				</div>
 
 				<div class="field-row">
-					<Textfield
-						variant="outlined"
-						type="number"
-						label="Odometer (km)"
-						bind:value={odometerKm}
-						input$name="odometerKm"
-						input$step="0.1"
-						input$min="0"
-						required
-						style="width: 100%"
-						invalid={!!errors.odometerKm}
-					/>
-					{#if errors.odometerKm}<p class="field-error">{errors.odometerKm}</p>{/if}
+					<div class="odometer-field">
+						<Textfield
+							variant="outlined"
+							type="number"
+							label="Odometer (km)"
+							bind:value={odometerKm}
+							input$name="odometerKm"
+							input$step="0.1"
+							input$min="0"
+							required
+							style="flex: 1; min-width: 0"
+							invalid={!!errors.odometerKm}
+						/>
+						{#if data.carOdometerEnabled}
+							<ReadFromCarButton alert={carAlert} onresult={onAddRead} />
+						{/if}
+					</div>
+					<input type="hidden" name="odometerFromCar" value={odometerFromCar} />
+					{#if errors.odometerKm}
+						<p class="field-error">{errors.odometerKm}</p>
+					{:else if addHint && addHintVisible}
+						<CarHintLine hint={addHint} />
+					{/if}
 				</div>
 
 				<div class="field-row">
@@ -340,6 +469,10 @@
 	</Card>
 {/if}
 
+{#if carAlert}
+	<IntegrationAlertBanner alert={carAlert} />
+{/if}
+
 <h2 class="section-title">History</h2>
 
 {#if data.sessions.length === 0}
@@ -378,7 +511,19 @@
 				</div>
 				<div class="session-row__details">
 					{#if session.odometerKm != null}
-						<span>{session.odometerKm.toLocaleString()} km</span>
+						<span class="odometer">
+							{session.odometerKm.toLocaleString()} km
+							{#if session.odometerSource === 'car'}
+								<span
+									class="odometer-source"
+									role="img"
+									title="Odometer reported by the car via Home Assistant"
+									aria-label="Odometer reported by the car via Home Assistant"
+								>
+									<Icon path={mdiCar} size={15} />
+								</span>
+							{/if}
+						</span>
 					{/if}
 					{#if session.kwhUsed != null}
 						<span>{session.kwhUsed} kWh</span>
@@ -431,22 +576,43 @@
 							</label>
 						{/if}
 						{#if session.odometerKm == null}
-							<label class="complete-form__field">
-								<span class="complete-form__label">Add odometer (km)</span>
+							<div class="complete-form__field">
+								<label class="complete-form__label" for="odometer-{session.id}"
+									>Add odometer (km)</label
+								>
+								<div class="complete-form__odometer">
+									<input
+										id="odometer-{session.id}"
+										type="number"
+										name="odometerKm"
+										step="0.1"
+										min="0"
+										required
+										bind:value={draftOdometers[session.id]}
+										class:invalid={completeErrorId === session.id && !!completeError}
+									/>
+									{#if data.carOdometerEnabled}
+										<ReadFromCarButton
+											draftId={session.id}
+											alert={carAlert}
+											onresult={(result) => onDraftRead(session.id, result)}
+										/>
+									{/if}
+								</div>
 								<input
-									type="number"
-									name="odometerKm"
-									step="0.1"
-									min="0"
-									required
-									class:invalid={completeErrorId === session.id && !!completeError}
+									type="hidden"
+									name="odometerFromCar"
+									value={draftFromCar[session.id] ?? ''}
 								/>
-							</label>
+							</div>
 						{/if}
 						<Button variant="outlined" type="submit" disabled={completingId === session.id}>
 							<Label>{completingId === session.id ? 'Saving…' : 'Complete'}</Label>
 						</Button>
 					</form>
+					{#if session.odometerKm == null && draftHintVisible(session.id)}
+						<CarHintLine hint={draftHints[session.id]} />
+					{/if}
 					{#if completeErrorId === session.id && completeError}
 						<p class="field-error">{completeError}</p>
 					{/if}
@@ -623,6 +789,34 @@
 		color: #334155;
 	}
 
+	.complete-form__odometer {
+		display: flex;
+		align-items: center;
+		gap: 0.25rem;
+	}
+
+	.complete-form__odometer input {
+		flex: 1;
+		min-width: 0;
+	}
+
+	.odometer-field {
+		display: flex;
+		align-items: center;
+		gap: 0.25rem;
+	}
+
+	.odometer {
+		display: inline-flex;
+		align-items: center;
+		gap: 0.25rem;
+	}
+
+	.odometer-source {
+		display: inline-flex;
+		color: #0f766e;
+	}
+
 	.complete-form__field input {
 		font-size: 1rem;
 		padding: 0.55rem 0.6rem;
@@ -771,6 +965,10 @@
 
 		.complete-form__field {
 			color: #94a3b8;
+		}
+
+		.odometer-source {
+			color: #2dd4bf;
 		}
 
 		.complete-form__field input {

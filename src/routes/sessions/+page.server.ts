@@ -3,6 +3,7 @@ import type { Actions, PageServerLoad } from './$types';
 import { db } from '$lib/server/db';
 import {
 	billingPeriods,
+	carOdometerIntegration,
 	chargingSessions,
 	evnexDismissedSessions,
 	evnexIntegration,
@@ -30,11 +31,12 @@ import {
 import { recordAuthFailure, sessionFor } from '$lib/server/evnex-token';
 
 export const load: PageServerLoad = async () => {
-	const [sessions, periods, [settingsRow], [integration]] = await Promise.all([
+	const [sessions, periods, [settingsRow], [integration], [carOdometer]] = await Promise.all([
 		db.select().from(chargingSessions),
 		db.select().from(billingPeriods),
 		db.select().from(settings).limit(1),
-		db.select().from(evnexIntegration).limit(1)
+		db.select().from(evnexIntegration).limit(1),
+		db.select().from(carOdometerIntegration).limit(1)
 	]);
 
 	const periodById = new Map(periods.map((period) => [period.id, period]));
@@ -58,7 +60,19 @@ export const load: PageServerLoad = async () => {
 		integration.enabled
 	);
 
-	return { sessions: rows, homeAddress: settingsRow?.homeAddress ?? null, evnexReady };
+	// Shows the Read from car buttons and triggers the post-pull auto-fill
+	// (BYD-INTEGRATION-PLAN.md §7.2). A broken status still counts as enabled: the
+	// buttons stay visible in their error state (§7.3), from the layout's alert.
+	const carOdometerEnabled = Boolean(
+		carOdometer?.enabled && carOdometer.baseUrl && carOdometer.secret
+	);
+
+	return {
+		sessions: rows,
+		homeAddress: settingsRow?.homeAddress ?? null,
+		evnexReady,
+		carOdometerEnabled
+	};
 };
 
 type FormValues = {
@@ -69,6 +83,7 @@ type FormValues = {
 	kwhUsed: string | null;
 	location: string | null;
 	notes: string | null;
+	odometerFromCar: string | null;
 };
 
 function readForm(form: FormData): FormValues {
@@ -79,8 +94,17 @@ function readForm(form: FormData): FormValues {
 		odometerKm: form.get('odometerKm')?.toString() ?? null,
 		kwhUsed: form.get('kwhUsed')?.toString() ?? null,
 		location: form.get('location')?.toString() ?? null,
-		notes: form.get('notes')?.toString() ?? null
+		notes: form.get('notes')?.toString() ?? null,
+		odometerFromCar: form.get('odometerFromCar')?.toString() ?? null
 	};
+}
+
+/**
+ * 'car' only if the submitted odometer is still exactly the value Read from car
+ * fetched; otherwise the user edited it, and it counts as manual (plan §7.2).
+ */
+function odometerSourceFor(odometerKm: number, fromCar: string | null): 'car' | 'manual' {
+	return fromCar ? (Number(fromCar) === odometerKm ? 'car' : 'manual') : 'manual';
 }
 
 function classifyPollError(err: unknown): 'network_error' | 'api_error' {
@@ -182,7 +206,8 @@ export const actions: Actions = {
 			kwhUsed,
 			location: validatedLocation,
 			cost,
-			notes
+			notes,
+			odometerSource: odometerSourceFor(odometerKm, values.odometerFromCar)
 		});
 
 		return {
@@ -236,6 +261,7 @@ export const actions: Actions = {
 		}
 
 		let odometerKm = session.odometerKm;
+		let odometerSource = session.odometerSource;
 		let odometerWarning = false;
 		if (odometerKm == null) {
 			const odoRaw = form.get('odometerKm')?.toString() ?? '';
@@ -247,6 +273,7 @@ export const actions: Actions = {
 				});
 			}
 			odometerKm = parsed;
+			odometerSource = odometerSourceFor(parsed, form.get('odometerFromCar')?.toString() ?? null);
 			const existingSessions = await db.select().from(chargingSessions);
 			odometerWarning = isOdometerBelowLastRecorded(odometerKm, existingSessions);
 		}
@@ -265,7 +292,7 @@ export const actions: Actions = {
 
 		await db
 			.update(chargingSessions)
-			.set({ kwhUsed, odometerKm, cost })
+			.set({ kwhUsed, odometerKm, odometerSource, cost })
 			.where(eq(chargingSessions.id, id));
 
 		return { completed: true, completedId: id, noRatePlan, odometerWarning };
@@ -394,7 +421,10 @@ export const actions: Actions = {
 				id: r.id,
 				externalId: r.externalId,
 				kwhUsed: r.kwhUsed,
-				billingPeriodId: r.billingPeriodId
+				billingPeriodId: r.billingPeriodId,
+				odometerKm: r.odometerKm,
+				startedAt: r.startedAt,
+				endedAt: r.endedAt
 			})),
 			dismissedRows.map((r) => r.externalId),
 			{ windowStart, timeZone, location, submittedPeriodIds }
@@ -474,8 +504,17 @@ export const actions: Actions = {
 						location: draft.location,
 						cost,
 						notes: draft.notes,
-						externalId: draft.externalId
+						externalId: draft.externalId,
+						startedAt: draft.startedAt,
+						endedAt: draft.endedAt
 					})
+					.run();
+			}
+
+			for (const { id, startedAt, endedAt } of planResult.backfill) {
+				tx.update(chargingSessions)
+					.set({ startedAt, endedAt })
+					.where(eq(chargingSessions.id, id))
 					.run();
 			}
 

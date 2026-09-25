@@ -193,6 +193,7 @@ export async function fetchSessions(
 			// app's own EvnexSessionPayload, which keeps it as the raw ISO string
 			// toLocalDateTime (evnex.ts) expects — convert back.
 			startDate: session.attributes.startDate?.toISOString() ?? null,
+			endDate: session.attributes.endDate?.toISOString() ?? null,
 			sessionStatus: asKnownStatus(session.attributes.sessionStatus),
 			energyKwh: stillCharging || wh === null ? null : wh / 1000
 		};

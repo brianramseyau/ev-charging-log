@@ -1,5 +1,5 @@
 // Session construction and terminal-failure recording for the Evnex integration.
-// Not a "pure" module in the sense the rest of src/lib/server/*.ts is (CLAUDE.md's
+// Not a "pure" module in the sense the rest of src/lib/server/*.ts is (AGENTS.md's
 // layering convention keeps db imports confined to +page.server.ts) — this is a
 // deliberate, narrow exception so the two things a caller needs a database for
 // (persisting every token the SDK issues, and recording a terminal auth failure)

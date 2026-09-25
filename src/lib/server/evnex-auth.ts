@@ -122,7 +122,7 @@ export async function signIn(email: string, password: string): Promise<EvnexToke
  * request (the package's own persist-before-publish guarantee). `evnex-token.ts`'s
  * `sessionFor` is the only caller: it supplies the `onTokenUpdate` that actually
  * writes the row back to the database, keeping this file free of any db import per
- * CLAUDE.md's layering convention.
+ * AGENTS.md's layering convention.
  */
 export function buildEvnexAuth(
 	tokens: {

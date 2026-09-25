@@ -43,6 +43,13 @@ export interface EvnexSessionPayload {
 	 */
 	startDate?: string | null;
 	/**
+	 * ISO UTC timestamp of the session end (`attributes.endDate`). Absent while
+	 * the session is still charging. Only carried through to the draft's
+	 * `endedAt` for the car-odometer match (BYD-INTEGRATION-PLAN.md §5) —
+	 * `energyKwh` is already null whenever this is, so no import rule reads it.
+	 */
+	endDate?: string | null;
+	/**
 	 * `attributes.sessionStatus`. Missing must be treated as "not Invalid" —
 	 * `planImport` rule 1 tests `=== 'Invalid'`, never `!== 'Completed'`, so
 	 * a status-less session is never wrongly tombstoned.
@@ -63,6 +70,8 @@ export interface DraftFromEvnex {
 	kind: 'home';
 	date: string; // local, "YYYY-MM-DD", from startDate
 	time: string; // local, "HH:mm", from startDate
+	startedAt: string; // ISO UTC instant, from startDate
+	endedAt: string | null; // ISO UTC instant, from endDate
 	odometerKm: null;
 	kwhUsed: number | null; // null while charging is still in progress
 	location: string;
@@ -137,6 +146,8 @@ export function toDraftSession(
 		kind: 'home',
 		date,
 		time,
+		startedAt: payload.startDate,
+		endedAt: payload.endDate ?? null,
 		odometerKm: null,
 		kwhUsed: payload.energyKwh,
 		location: opts.location,
@@ -161,6 +172,9 @@ export interface ExistingSessionForImport {
 	externalId: string | null;
 	kwhUsed: number | null;
 	billingPeriodId: number | null;
+	odometerKm: number | null;
+	startedAt: string | null;
+	endedAt: string | null;
 }
 
 /**
@@ -205,6 +219,12 @@ export interface ExistingSessionForImport {
  *    *existing* row's already-known `billingPeriodId`, which is the case
  *    this function has the data to check.)
  *
+ * Separately from rules 6–9, an existing row that's still missing its
+ * odometer and doesn't yet have the charge's `startedAt`/`endedAt` instants
+ * gets them in `backfill` — imports from before those columns existed, and a
+ * draft whose `endDate` only arrived on a later poll. The car-odometer match
+ * (car-odometer.ts) needs both. Never for a submitted period's row.
+ *
  * `kwhUsed === 0` on an *existing* row is still treated as a present value,
  * never as "still charging" (rule 7's presence check is `!= null`, never a
  * bare truthy check) — rule 2 only ever stops a *zero remote reading* from
@@ -218,11 +238,13 @@ export function planImport(
 ): {
 	insert: DraftFromEvnex[];
 	update: { id: number; kwhUsed: number }[];
+	backfill: { id: number; startedAt: string; endedAt: string | null }[];
 	tombstone: string[];
 	skipped: { externalId: string; reason: SkipReason }[];
 } {
 	const insert: DraftFromEvnex[] = [];
 	const update: { id: number; kwhUsed: number }[] = [];
+	const backfill: { id: number; startedAt: string; endedAt: string | null }[] = [];
 	const tombstone: string[] = [];
 	const skipped: { externalId: string; reason: SkipReason }[] = [];
 
@@ -290,6 +312,20 @@ export function planImport(
 			continue;
 		}
 
+		const periodSubmitted =
+			existingRow.billingPeriodId != null && submittedPeriodIds.has(existingRow.billingPeriodId);
+
+		// Backfill the charge's instants onto a still-open draft, independent of
+		// whether its kWh is settled (rules 6–9 below).
+		const endedAt = session.endDate ?? null;
+		if (
+			existingRow.odometerKm == null &&
+			!periodSubmitted &&
+			(existingRow.startedAt == null || (existingRow.endedAt == null && endedAt != null))
+		) {
+			backfill.push({ id: existingRow.id, startedAt: session.startDate, endedAt });
+		}
+
 		// Rule 6: never overwrite a kWh value the user may have corrected.
 		if (existingRow.kwhUsed != null) {
 			skipped.push({ externalId: session.id, reason: 'already_complete' });
@@ -303,10 +339,7 @@ export function planImport(
 		}
 
 		// Rule 9: the existing row's billing period is already submitted.
-		if (
-			existingRow.billingPeriodId != null &&
-			submittedPeriodIds.has(existingRow.billingPeriodId)
-		) {
+		if (periodSubmitted) {
 			skipped.push({ externalId: session.id, reason: 'period_submitted' });
 			continue;
 		}
@@ -315,5 +348,5 @@ export function planImport(
 		update.push({ id: existingRow.id, kwhUsed: session.energyKwh });
 	}
 
-	return { insert, update, tombstone, skipped };
+	return { insert, update, backfill, tombstone, skipped };
 }

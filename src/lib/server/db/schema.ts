@@ -48,7 +48,17 @@ export const chargingSessions = sqliteTable('charging_sessions', {
 	// Evnex session UUID (see foundational/EVNEX-INTEGRATION-PLAN.md §5.3). Null for
 	// manually-logged sessions. Unique so a repeat poll can't double-insert if two
 	// polls race. SQLite permits multiple NULLs in a UNIQUE index, so this is fine.
-	externalId: text('external_id').unique()
+	externalId: text('external_id').unique(),
+	// Where odometerKm came from, for the lease company and the history list's
+	// provenance icon. NULL (every row from before this column existed) reads as
+	// 'manual'. See foundational/BYD-INTEGRATION-PLAN.md §5.
+	odometerSource: text('odometer_source', { enum: ['manual', 'car'] }),
+	// ISO UTC instants of the charge, filled by the Evnex import from its
+	// startDate/endDate. Null for manual sessions. The car-odometer match needs
+	// real instants: converting the local date/time back breaks across DST
+	// changes. endedAt stays null while the charge is still running.
+	startedAt: text('started_at'),
+	endedAt: text('ended_at')
 });
 
 // Single-row, same pattern as `settings`. Kept separate because `settings` is report
@@ -97,4 +107,22 @@ export const evnexDismissedSessions = sqliteTable('evnex_dismissed_sessions', {
 	// presence in this table is enough — but it's the only way to answer "why does
 	// this session never appear?" without guessing.
 	reason: text('reason', { enum: ['user_deleted', 'invalid', 'zero_energy'] }).notNull()
+});
+
+// Single-row, same pattern as `evnex_integration`. Reads the car's odometer from a
+// companion Home Assistant integration (brianramseyau/ev-charging-log-hass) through
+// one read-only endpoint. See foundational/BYD-INTEGRATION-PLAN.md §5.
+export const carOdometerIntegration = sqliteTable('car_odometer_integration', {
+	id: integer('id').primaryKey({ autoIncrement: true }),
+	baseUrl: text('base_url'), // e.g. https://ha.example.com; https required (plan §4.5)
+	// The companion secret. Scoped to reading odometer history only, but still a
+	// credential: never logged, rendered after setup, or returned by a `load`.
+	secret: text('secret'),
+	enabled: integer('enabled', { mode: 'boolean' }).notNull().default(false),
+	lastReadAt: text('last_read_at'),
+	lastSuccessAt: text('last_success_at'), // drives the 3-day "can't reach" escalation
+	lastReadStatus: text('last_read_status', {
+		enum: ['ok', 'auth_failed', 'unreachable', 'companion_missing', 'companion_outdated', 'no_data']
+	}),
+	lastReadError: text('last_read_error')
 });

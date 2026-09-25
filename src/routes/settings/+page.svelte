@@ -1,12 +1,14 @@
 <script lang="ts">
 	import { enhance } from '$app/forms';
+	import { invalidateAll } from '$app/navigation';
 	import Card, { Content } from '@smui/card';
 	import Textfield from '@smui/textfield';
 	import Select, { Option } from '@smui/select';
 	import Switch from '@smui/switch';
 	import FormField from '@smui/form-field';
 	import Button, { Label } from '@smui/button';
-	import { mdiRefresh } from '@mdi/js';
+	import { mdiAlertCircleOutline, mdiContentCopy, mdiRefresh } from '@mdi/js';
+	import { formatAge, isBrokenStatusName } from '$lib/car-reading';
 	import Icon from '$lib/components/Icon.svelte';
 	import AddressField from '$lib/components/AddressField.svelte';
 	import type { PageData, ActionData } from './$types';
@@ -99,6 +101,67 @@
 		if (chargePointsLoaded) return;
 		loadChargePoints(false);
 	});
+
+	// --- Car odometer (Home Assistant) card — BYD-INTEGRATION-PLAN.md §7.1 ---
+
+	const COMPANION_URL = 'https://github.com/brianramseyau/ev-charging-log-hass';
+
+	let carBaseUrl = $state('');
+	let carEnabled = $state(false);
+	let carBusy = $state<'generate' | 'save' | 'remove' | null>(null);
+	let testing = $state(false);
+	let testResult = $state<
+		{ ok: true; km: number; carReportedAt: string } | { ok: false; message: string } | null
+	>(null);
+	let copied = $state(false);
+
+	$effect(() => {
+		carBaseUrl = data.carOdometer.baseUrl ?? '';
+		carEnabled = data.carOdometer.enabled;
+	});
+
+	const carBroken = $derived(
+		data.carOdometer.configured &&
+			data.carOdometer.lastReadStatus != null &&
+			isBrokenStatusName(data.carOdometer.lastReadStatus)
+	);
+
+	const BROKEN_EXPLANATIONS: Record<string, string> = {
+		auth_failed:
+			"Home Assistant rejected the secret. Paste it again in the companion's settings in Home Assistant (or rotate it below), then tap Test.",
+		companion_missing:
+			"The Home Assistant companion isn't installed or set up. Install it from HACS and add the EV Charging Log companion integration, then tap Test.",
+		companion_outdated:
+			'The Home Assistant companion needs updating. Update it in HACS and restart Home Assistant, then tap Test.'
+	};
+
+	async function testCarOdometer() {
+		testing = true;
+		testResult = null;
+		try {
+			const res = await fetch('/settings/car-odometer', { method: 'POST' });
+			const body = await res.json();
+			testResult = body.ok
+				? { ok: true, km: body.km, carReportedAt: body.carReportedAt }
+				: { ok: false, message: body.message };
+		} catch {
+			testResult = { ok: false, message: "Couldn't reach the app's server." };
+		} finally {
+			testing = false;
+		}
+		// The recorded status drives the banner and nav dot — refresh them.
+		await invalidateAll();
+	}
+
+	async function copySecret(secret: string) {
+		try {
+			await navigator.clipboard.writeText(secret);
+			copied = true;
+			setTimeout(() => (copied = false), 2000);
+		} catch {
+			// Clipboard needs a secure context; the field is selectable as a fallback.
+		}
+	}
 
 	function formatLastPolled(iso: string | null) {
 		if (!iso) return 'never polled';
@@ -340,6 +403,209 @@
 	</Content>
 </Card>
 
+<h2 class="section-title">Car odometer (Home Assistant)</h2>
+<p class="page-subtitle">
+	Read the odometer from your car through Home Assistant, so imported home sessions complete
+	themselves. Needs the
+	<a href={COMPANION_URL} target="_blank" rel="noopener noreferrer">EV Charging Log companion</a>
+	installed in Home Assistant, alongside a car integration such as hass-byd-vehicle.
+</p>
+
+<Card padded>
+	<Content>
+		{#if carBroken && data.carOdometer.lastReadStatus}
+			<div class="car-error" role="alert">
+				<span class="car-error__icon"><Icon path={mdiAlertCircleOutline} size={20} /></span>
+				<div>
+					<p class="car-error__title">Car odometer paused</p>
+					<p class="car-error__text">
+						{BROKEN_EXPLANATIONS[data.carOdometer.lastReadStatus]}
+					</p>
+					<p class="car-error__text">
+						{data.carOdometer.lastSuccessAt
+							? `Last successful read ${formatAge(data.carOdometer.lastSuccessAt, new Date())}.`
+							: 'No successful read yet.'}
+					</p>
+				</div>
+			</div>
+		{/if}
+
+		{#if form?.carOdometerSecret}
+			<div class="car-secret">
+				<p class="car-secret__lead">
+					{form.rotated ? 'New secret' : 'Your secret'} — copy it now, it won't be shown again:
+				</p>
+				<div class="car-secret__row">
+					<input
+						class="car-secret__value"
+						readonly
+						value={form.carOdometerSecret}
+						aria-label="Companion secret"
+						onfocus={(e) => e.currentTarget.select()}
+					/>
+					<Button onclick={() => copySecret(form.carOdometerSecret as string)}>
+						<Icon path={mdiContentCopy} size={18} />
+						<Label>{copied ? 'Copied' : 'Copy'}</Label>
+					</Button>
+				</div>
+				<p class="field-hint car-secret__hint">
+					In Home Assistant: Settings → Devices &amp; services →
+					{form.rotated
+						? 'EV Charging Log companion → Configure, and paste it there.'
+						: 'Add integration → EV Charging Log companion. Pick the Odometer and Telemetry last updated sensors and paste the secret.'}
+					Then tap Test.
+					<a href={COMPANION_URL} target="_blank" rel="noopener noreferrer"
+						>Companion install instructions</a
+					>
+				</p>
+			</div>
+		{/if}
+
+		{#if !data.carOdometer.configured}
+			<form
+				method="POST"
+				action="?/generateCarOdometerSecret"
+				class="settings-form"
+				use:enhance={() => {
+					carBusy = 'generate';
+					return async ({ update }) => {
+						carBusy = null;
+						await update({ reset: false });
+					};
+				}}
+			>
+				<Textfield
+					variant="outlined"
+					type="url"
+					label="Home Assistant URL"
+					bind:value={carBaseUrl}
+					input$name="baseUrl"
+					input$placeholder="https://ha.example.com"
+					input$autocomplete="off"
+					style="width: 100%"
+				/>
+				<p class="field-hint">
+					The same https:// address you use to open Home Assistant, at home and away.
+				</p>
+				<Button variant="raised" type="submit" disabled={carBusy != null} style="width: 100%">
+					<Label>{carBusy === 'generate' ? 'Generating…' : 'Generate secret'}</Label>
+				</Button>
+			</form>
+		{:else}
+			<p class="car-status">
+				{#if testResult?.ok}
+					<strong>{testResult.km.toLocaleString()} km</strong> — car reported {formatAge(
+						testResult.carReportedAt,
+						new Date()
+					)}
+				{:else if data.carOdometer.lastReadStatus === 'ok' && data.carOdometer.lastReadAt}
+					Working · last read {formatAge(data.carOdometer.lastReadAt, new Date())}
+				{:else if data.carOdometer.lastReadStatus == null}
+					Not tested yet — paste the secret into the companion in Home Assistant, then tap Test.
+				{:else if !carBroken}
+					<span class="car-status--warning"
+						>Last read failed{data.carOdometer.lastReadError
+							? `: ${data.carOdometer.lastReadError}`
+							: '.'}</span
+					>
+				{/if}
+			</p>
+			{#if testResult && !testResult.ok}
+				<p class="settings-form__error car-test-error">{testResult.message}</p>
+			{/if}
+
+			<Button
+				variant={carBroken ? 'raised' : 'outlined'}
+				onclick={testCarOdometer}
+				disabled={testing}
+				style="width: 100%; margin-bottom: 1rem"
+			>
+				<Label>{testing ? 'Testing…' : 'Test'}</Label>
+			</Button>
+
+			<form
+				method="POST"
+				action="?/saveCarOdometer"
+				class="settings-form"
+				use:enhance={() => {
+					carBusy = 'save';
+					return async ({ update }) => {
+						carBusy = null;
+						await update({ reset: false });
+					};
+				}}
+			>
+				<Textfield
+					variant="outlined"
+					type="url"
+					label="Home Assistant URL"
+					bind:value={carBaseUrl}
+					input$name="baseUrl"
+					input$autocomplete="off"
+					style="width: 100%"
+				/>
+				<p class="field-hint">Secret saved · ••••••••••••</p>
+
+				<FormField>
+					<Switch bind:checked={carEnabled} />
+					{#snippet label()}Enabled{/snippet}
+				</FormField>
+				<input type="hidden" name="enabled" value={carEnabled ? 'true' : 'false'} />
+
+				<Button variant="raised" type="submit" disabled={carBusy != null} style="width: 100%">
+					<Label>{carBusy === 'save' ? 'Saving…' : 'Save'}</Label>
+				</Button>
+				{#if form?.savedCarOdometer}
+					<p class="settings-form__ok">Saved.</p>
+				{/if}
+			</form>
+
+			<div class="car-secondary-actions">
+				<form
+					method="POST"
+					action="?/generateCarOdometerSecret"
+					use:enhance={() => {
+						carBusy = 'generate';
+						return async ({ update }) => {
+							carBusy = null;
+							testResult = null;
+							await update({ reset: false });
+						};
+					}}
+				>
+					<Button type="submit" disabled={carBusy != null}>
+						<Label>{carBusy === 'generate' ? 'Rotating…' : 'Rotate secret'}</Label>
+					</Button>
+				</form>
+				<form
+					method="POST"
+					action="?/removeCarOdometer"
+					use:enhance={({ cancel }) => {
+						if (!confirm('Remove the car odometer integration? The secret will be deleted.')) {
+							cancel();
+							return;
+						}
+						carBusy = 'remove';
+						return async ({ update }) => {
+							carBusy = null;
+							testResult = null;
+							await update();
+						};
+					}}
+				>
+					<Button type="submit" disabled={carBusy != null}>
+						<Label>{carBusy === 'remove' ? 'Removing…' : 'Remove'}</Label>
+					</Button>
+				</form>
+			</div>
+		{/if}
+
+		{#if form?.carOdometerError}
+			<p class="settings-form__error car-test-error">{form.carOdometerError}</p>
+		{/if}
+	</Content>
+</Card>
+
 <h2 class="section-title">Historical import</h2>
 <p class="page-subtitle">Import sessions from a legacy monthly spreadsheet.</p>
 
@@ -448,6 +714,97 @@
 		color: #64748b;
 	}
 
+	.page-subtitle a {
+		color: inherit;
+	}
+
+	.car-error {
+		display: flex;
+		gap: 0.6rem;
+		align-items: flex-start;
+		background: #fee2e2;
+		color: #991b1b;
+		border: 1px solid #b91c1c;
+		border-radius: 8px;
+		padding: 0.65rem 0.85rem;
+		margin: 0 0 1rem;
+	}
+
+	.car-error__icon {
+		display: flex;
+		flex: none;
+		margin-top: 0.05rem;
+	}
+
+	.car-error__title {
+		font-weight: 600;
+		margin: 0 0 0.2rem;
+		font-size: 0.9rem;
+	}
+
+	.car-error__text {
+		margin: 0 0 0.2rem;
+		font-size: 0.85rem;
+	}
+
+	.car-secret {
+		background: color-mix(in srgb, #0f766e 8%, transparent);
+		border: 1px solid color-mix(in srgb, #0f766e 40%, transparent);
+		border-radius: 8px;
+		padding: 0.75rem 0.85rem;
+		margin: 0 0 1rem;
+	}
+
+	.car-secret__lead {
+		margin: 0 0 0.5rem;
+		font-size: 0.88rem;
+		font-weight: 600;
+	}
+
+	.car-secret__row {
+		display: flex;
+		gap: 0.5rem;
+		align-items: center;
+	}
+
+	.car-secret__value {
+		flex: 1;
+		min-width: 0;
+		font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+		font-size: 0.85rem;
+		padding: 0.5rem 0.6rem;
+		border: 1px solid #cbd5e1;
+		border-radius: 6px;
+		background: #fff;
+		color: #0f172a;
+		color-scheme: light;
+	}
+
+	.car-secret__hint {
+		margin: 0.5rem 0 0;
+	}
+
+	.car-status {
+		font-size: 0.9rem;
+		margin: 0 0 0.75rem;
+	}
+
+	.car-status--warning {
+		color: #b45309;
+	}
+
+	.car-test-error {
+		margin: 0 0 0.75rem;
+		font-size: 0.88rem;
+	}
+
+	.car-secondary-actions {
+		display: flex;
+		justify-content: space-between;
+		gap: 0.5rem;
+		margin-top: 0.75rem;
+	}
+
 	.app-version {
 		text-align: center;
 		font-size: 0.75rem;
@@ -488,6 +845,27 @@
 		.evnex-warning {
 			background: #78350f;
 			color: #fde68a;
+		}
+
+		.car-error {
+			background: #450a0a;
+			color: #fecaca;
+			border-color: #f87171;
+		}
+
+		.car-secret__value {
+			background: #1e293b;
+			border-color: rgba(255, 255, 255, 0.2);
+			color: #e2e8f0;
+			color-scheme: dark;
+		}
+
+		.car-status--warning {
+			color: #fbbf24;
+		}
+
+		.settings-form__error {
+			color: #f87171;
 		}
 	}
 </style>
