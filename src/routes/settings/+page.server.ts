@@ -2,7 +2,10 @@ import { fail } from '@sveltejs/kit';
 import { eq } from 'drizzle-orm';
 import type { Actions, PageServerLoad } from './$types';
 import { db } from '$lib/server/db';
-import { evnexIntegration, settings } from '$lib/server/db/schema';
+import { carOdometerIntegration, evnexIntegration, settings } from '$lib/server/db/schema';
+import { validateBaseUrl } from '$lib/server/car-odometer';
+import { generateSecret } from '$lib/server/car-odometer-client';
+import { getCarOdometerIntegration } from '$lib/server/car-odometer-store';
 import {
 	EvnexMfaRequiredError,
 	EvnexNetworkError,
@@ -38,13 +41,14 @@ function eqId(id: number) {
 // renders with only local DB reads, and the browser fetches
 // `/settings/charge-points` itself once the page has mounted (see +page.svelte).
 export const load: PageServerLoad = async () => {
-	const [settingsRow, integration] = await Promise.all([
+	const [settingsRow, integration, carOdometer] = await Promise.all([
 		db
 			.select()
 			.from(settings)
 			.limit(1)
 			.then((rows) => rows[0]),
-		getIntegration()
+		getIntegration(),
+		getCarOdometerIntegration()
 	]);
 
 	const cardState: 'signed_out' | 'connected' | 'auth_failed' =
@@ -58,6 +62,16 @@ export const load: PageServerLoad = async () => {
 	// credentials and must never reach the browser (plan §7.1, §5.6).
 	return {
 		settings: settingsRow ?? null,
+		// Never the secret itself — only whether one exists (BYD-INTEGRATION-PLAN.md §8).
+		carOdometer: {
+			configured: carOdometer?.secret != null && carOdometer.baseUrl != null,
+			baseUrl: carOdometer?.baseUrl ?? null,
+			enabled: carOdometer?.enabled ?? false,
+			lastReadAt: carOdometer?.lastReadAt ?? null,
+			lastSuccessAt: carOdometer?.lastSuccessAt ?? null,
+			lastReadStatus: carOdometer?.lastReadStatus ?? null,
+			lastReadError: carOdometer?.lastReadError ?? null
+		},
 		evnex: integration
 			? {
 					cardState,
@@ -257,5 +271,56 @@ export const actions: Actions = {
 		clearCachedChargePoints();
 
 		return { disconnected: true };
+	},
+
+	// Generate secret (first setup) and Rotate secret share this: a fresh secret,
+	// shown once in the action result for pasting into the companion, then masked.
+	generateCarOdometerSecret: async ({ request }) => {
+		const form = await request.formData();
+		const existing = await getCarOdometerIntegration();
+		const rawUrl = form.get('baseUrl')?.toString() ?? existing?.baseUrl ?? '';
+		const validated = validateBaseUrl(rawUrl);
+		if (!validated.ok) return fail(400, { carOdometerError: validated.error });
+
+		const secret = generateSecret();
+		// A new secret invalidates whatever was learned about the old one.
+		const values = {
+			baseUrl: validated.baseUrl,
+			secret,
+			lastReadStatus: null,
+			lastReadError: null
+		};
+		if (existing) {
+			await db
+				.update(carOdometerIntegration)
+				.set(values)
+				.where(eq(carOdometerIntegration.id, existing.id));
+		} else {
+			await db.insert(carOdometerIntegration).values(values);
+		}
+
+		return { carOdometerSecret: secret, rotated: existing?.secret != null };
+	},
+
+	saveCarOdometer: async ({ request }) => {
+		const form = await request.formData();
+		const existing = await getCarOdometerIntegration();
+		if (!existing || existing.secret == null) {
+			return fail(400, { carOdometerError: 'Generate a secret first.' });
+		}
+		const validated = validateBaseUrl(form.get('baseUrl')?.toString() ?? '');
+		if (!validated.ok) return fail(400, { carOdometerError: validated.error });
+		const enabled = form.get('enabled') === 'true';
+
+		await db
+			.update(carOdometerIntegration)
+			.set({ baseUrl: validated.baseUrl, enabled })
+			.where(eq(carOdometerIntegration.id, existing.id));
+		return { savedCarOdometer: true };
+	},
+
+	removeCarOdometer: async () => {
+		await db.delete(carOdometerIntegration);
+		return { removedCarOdometer: true };
 	}
 };

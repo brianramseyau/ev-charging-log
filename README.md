@@ -33,6 +33,8 @@ See [PLAN.md](PLAN.md) for the full project plan, data model, and build phases.
 - Import historical spreadsheet data.
 - Optional Evnex charger integration: pull recent home-charging sessions in
   as drafts, so only the odometer needs typing in by hand.
+- Optional car odometer via Home Assistant: fills those drafts' odometers from
+  the car, and reads it for a public session with one tap.
 - Personal dashboard: km/kWh efficiency trend, home vs public charging split,
   cost over time.
 - Installable PWA, mobile-first UI.
@@ -79,6 +81,32 @@ so worth saying plainly: it's built against a reverse-engineered contract and
 may break if Evnex changes it without notice. See
 [foundational/EVNEX-INTEGRATION-PLAN.md](foundational/EVNEX-INTEGRATION-PLAN.md)
 for the full design.
+
+## Car odometer via Home Assistant
+
+Optional. If your car is already in Home Assistant — for example a BYD through
+[hass-byd-vehicle](https://github.com/jkaberg/hass-byd-vehicle), or any
+integration with an odometer sensor in km plus a "car last reported" timestamp
+sensor — the app can read the odometer from it, so an imported home session
+completes itself and a public session's odometer is one tap away.
+
+1. In HACS, add
+   [brianramseyau/ev-charging-log-hass](https://github.com/brianramseyau/ev-charging-log-hass)
+   as a custom repository, install **EV Charging Log companion**, and restart
+   Home Assistant.
+2. In the app's `/settings`, under **Car odometer (Home Assistant)**, enter your
+   Home Assistant URL (`https://` required, or `http://` to a private IP) and
+   tap **Generate secret**.
+3. In Home Assistant, add the **EV Charging Log companion** integration, pick
+   the odometer and telemetry-timestamp sensors, and paste the secret.
+4. Back in the app, tap **Test**. The first successful Test switches it on.
+
+The secret only lets the holder read odometer history — no other entities, no
+services — and Home Assistant stores just its hash. There's no Home Assistant
+token and no deployment configuration; every call is made by the app's server.
+After **Pull from charger**, drafts whose charge the car reported during are
+filled automatically; anything less certain is only suggested. See
+[foundational/BYD-INTEGRATION-PLAN.md](foundational/BYD-INTEGRATION-PLAN.md).
 
 ## Building
 

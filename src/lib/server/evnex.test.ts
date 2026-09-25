@@ -11,6 +11,7 @@ function payload(overrides: Partial<EvnexSessionPayload> = {}): EvnexSessionPayl
 	return {
 		id: 'evnex-session-1',
 		startDate: '2026-08-08T10:00:00.000Z',
+		endDate: '2026-08-08T12:00:00.000Z',
 		sessionStatus: 'Completed',
 		energyKwh: 10,
 		...overrides
@@ -23,6 +24,11 @@ function existingRow(overrides: Partial<ExistingSessionForImport> = {}): Existin
 		externalId: 'evnex-session-1',
 		kwhUsed: null,
 		billingPeriodId: null,
+		odometerKm: null,
+		// Already carries its instants by default, so only the backfill tests below
+		// see a `backfill` entry.
+		startedAt: '2026-08-08T10:00:00.000Z',
+		endedAt: '2026-08-08T12:00:00.000Z',
 		...overrides
 	};
 }
@@ -333,5 +339,84 @@ describe('planImport', () => {
 		// Should be treated as a fresh insert, not matched against the manual row.
 		expect(result.insert).toHaveLength(1);
 		expect(result.update).toEqual([]);
+	});
+});
+
+describe('planImport: startedAt/endedAt (BYD-INTEGRATION-PLAN.md §5)', () => {
+	it('passes startDate/endDate through to a new draft as instants', () => {
+		const result = planImport([payload()], [], [], baseOpts);
+		expect(result.insert).toHaveLength(1);
+		expect(result.insert[0].startedAt).toBe('2026-08-08T10:00:00.000Z');
+		expect(result.insert[0].endedAt).toBe('2026-08-08T12:00:00.000Z');
+	});
+
+	it('backfills both instants onto an open draft imported before the columns existed', () => {
+		const result = planImport(
+			[payload()],
+			[existingRow({ kwhUsed: 10, startedAt: null, endedAt: null })],
+			[],
+			baseOpts
+		);
+		expect(result.backfill).toEqual([
+			{ id: 1, startedAt: '2026-08-08T10:00:00.000Z', endedAt: '2026-08-08T12:00:00.000Z' }
+		]);
+		// kWh is already set, so the kWh rules still say already_complete.
+		expect(result.skipped).toEqual([{ externalId: 'evnex-session-1', reason: 'already_complete' }]);
+	});
+
+	it('backfills startedAt with a null endedAt while the session is still charging', () => {
+		const result = planImport(
+			[payload({ endDate: null, energyKwh: null })],
+			[existingRow({ startedAt: null, endedAt: null })],
+			[],
+			baseOpts
+		);
+		expect(result.backfill).toEqual([
+			{ id: 1, startedAt: '2026-08-08T10:00:00.000Z', endedAt: null }
+		]);
+	});
+
+	it('fills in endedAt once the session finishes on a later poll', () => {
+		const result = planImport([payload()], [existingRow({ endedAt: null })], [], baseOpts);
+		expect(result.backfill).toEqual([
+			{ id: 1, startedAt: '2026-08-08T10:00:00.000Z', endedAt: '2026-08-08T12:00:00.000Z' }
+		]);
+		expect(result.update).toEqual([{ id: 1, kwhUsed: 10 }]);
+	});
+
+	it('does not backfill a row that already has its instants', () => {
+		const result = planImport([payload()], [existingRow()], [], baseOpts);
+		expect(result.backfill).toEqual([]);
+	});
+
+	it('does not backfill a row whose odometer is already filled', () => {
+		const result = planImport(
+			[payload()],
+			[existingRow({ odometerKm: 118204, kwhUsed: 10, startedAt: null, endedAt: null })],
+			[],
+			baseOpts
+		);
+		expect(result.backfill).toEqual([]);
+	});
+
+	it('does not backfill a row in a submitted period', () => {
+		const result = planImport(
+			[payload()],
+			[existingRow({ billingPeriodId: 7, startedAt: null, endedAt: null })],
+			[],
+			{ ...baseOpts, submittedPeriodIds: [7] }
+		);
+		expect(result.backfill).toEqual([]);
+		expect(result.skipped).toEqual([{ externalId: 'evnex-session-1', reason: 'period_submitted' }]);
+	});
+
+	it('does not backfill a tombstoned (Invalid) session', () => {
+		const result = planImport(
+			[payload({ sessionStatus: 'Invalid' })],
+			[existingRow({ startedAt: null, endedAt: null })],
+			[],
+			baseOpts
+		);
+		expect(result.backfill).toEqual([]);
 	});
 });

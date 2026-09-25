@@ -6,7 +6,12 @@
 	import logo from '$lib/assets/logo.svg';
 	import Icon from '$lib/components/Icon.svelte';
 
-	let { children } = $props();
+	let { children, data } = $props();
+
+	// A broken integration gets a dot on Settings, since that's where the fix
+	// happens (BYD-INTEGRATION-PLAN.md §7.3).
+	const settingsHref = resolve('/settings');
+	const settingsAlert = $derived(data.carOdometerAlert);
 
 	if (browser && !__ELECTRON_BUILD__) {
 		// The virtual module only exists when SvelteKitPWA is registered (skipped for
@@ -42,8 +47,19 @@
 	<nav class="bottom-nav" aria-label="Primary">
 		{#each navItems as item (item.href)}
 			<a href={item.href} class="bottom-nav__item" class:is-active={isActive(item.href)}>
-				<Icon path={item.icon} size={22} />
-				<span>{item.label}</span>
+				<span class="bottom-nav__icon">
+					<Icon path={item.icon} size={22} />
+					{#if item.href === settingsHref && settingsAlert}
+						<span class="bottom-nav__dot" title={settingsAlert.message}></span>
+					{/if}
+				</span>
+				<span>
+					{item.label}{#if item.href === settingsHref && settingsAlert}<span
+							class="visually-hidden"
+						>
+							(needs attention)</span
+						>{/if}
+				</span>
 			</a>
 		{/each}
 	</nav>
@@ -136,6 +152,31 @@
 		color: #0f766e;
 	}
 
+	.bottom-nav__icon {
+		position: relative;
+		display: flex;
+	}
+
+	.bottom-nav__dot {
+		position: absolute;
+		top: -1px;
+		right: -3px;
+		width: 9px;
+		height: 9px;
+		border-radius: 50%;
+		background: #b91c1c;
+		box-shadow: 0 0 0 2px #fff;
+	}
+
+	.visually-hidden {
+		position: absolute;
+		width: 1px;
+		height: 1px;
+		overflow: hidden;
+		clip-path: inset(50%);
+		white-space: nowrap;
+	}
+
 	@media (prefers-color-scheme: dark) {
 		/* Dark-mode-only tint of the same hue: at 25%-on-black (the badge treatment
 		   every chip on /sessions uses), the light-mode brand green (#1b3b2b) renders
@@ -156,6 +197,11 @@
 
 		.bottom-nav__item.is-active {
 			color: #2dd4bf;
+		}
+
+		.bottom-nav__dot {
+			background: #f87171;
+			box-shadow: 0 0 0 2px #111827;
 		}
 	}
 </style>
