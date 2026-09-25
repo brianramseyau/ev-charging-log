@@ -4,7 +4,9 @@ Status: **scoped, not started.** Confirmed: the user already runs the
 [`hass-byd-vehicle`](https://github.com/jkaberg/hass-byd-vehicle) Home Assistant
 integration, and it reads the odometer from this car. Approach chosen by the
 user: a small companion Home Assistant integration exposing one narrowly
-scoped, read-only endpoint (§2).
+scoped, read-only endpoint (§2). HA is reached through one HTTPS URL
+everywhere: a custom domain on Home Assistant Cloud (Nabu Casa), CNAMEd, with
+split-horizon DNS pointing it at the local instance at home (§4.5).
 Branch: `claude/byd-car-km-integration-pd6prj`
 
 Builds on [EVNEX-INTEGRATION-PLAN.md](EVNEX-INTEGRATION-PLAN.md), which already
@@ -47,7 +49,7 @@ One-time setup:
 1. In HACS, adds the companion repo as a custom repository, installs **EV
    Charging Log companion**, and restarts HA.
 2. In the app's `/settings`, under a new **Car odometer (Home Assistant)**
-   heading, enters the HA URL (for example `http://192.168.1.10:8123`) and
+   heading, enters the HA URL (for example `https://ha.example.com`) and
    taps **Generate secret**. The secret is shown with a Copy button.
 3. In HA, goes to Settings → Devices & services → Add integration → **EV
    Charging Log companion**. Picks the **Odometer** and **Telemetry last
@@ -67,10 +69,12 @@ Day to day:
 - **Public, or home without Evnex:** in the Add form, taps **Read from car**
   next to the Odometer field. It fills with the current value and a hint
   showing how old the car's data is.
-- **Desktop app away from home:** if HA can't be reached (no remote URL set
-  up), the buttons show "Home Assistant unreachable" and everything else works
-  as normal. Drafts can be filled when back home, as long as their charges are
-  still within HA's recorder retention (10 days by default).
+- **Away from home (desktop app):** nothing changes. The same URL reaches HA
+  through Home Assistant Cloud (§4.5). If HA can't be reached at all (HA down,
+  no internet, or the Cloud subscription has lapsed), the buttons show "Home
+  Assistant unreachable" and everything else works as normal. Drafts can be
+  filled later, as long as their charges are still within HA's recorder
+  retention (10 days by default).
 
 ---
 
@@ -108,10 +112,17 @@ the hassfest and HACS validation workflows.
 
 The view sets `requires_auth = False` so that HA's own token isn't required.
 Instead, it checks for `Authorization: Bearer <secret>` and compares
-`sha256(secret)` to the stored hash with `hmac.compare_digest`. On a mismatch
-it calls HA's `process_wrong_login(request)`, so HA's own IP-ban setting
-(`http: ip_ban_enabled`, `login_attempts_threshold`) applies to guessing,
-just as it does for HA's login page.
+`sha256(secret)` to the stored hash with `hmac.compare_digest`. A mismatch
+gets a plain `401`.
+
+It deliberately does **not** call HA's `process_wrong_login(request)`, even
+though that would feed failures into HA's IP ban. Behind Home Assistant Cloud
+or a local reverse proxy, HA may see every request as coming from the same
+relay or proxy address, unless `trusted_proxies` is set up exactly right. A
+stale secret in the app could then get the relay's address banned, which would
+lock the user out of their whole HA, not just this endpoint. It's also
+unnecessary: the secret is 256 random bits, so guessing it isn't a realistic
+attack, and rate-limiting adds nothing.
 
 Reading history uses the recorder's own API off the event loop:
 `get_instance(hass).async_add_executor_job(history.state_changes_during_period, …)`,
@@ -173,7 +184,43 @@ user has excluded either entity from the recorder, `changes` comes back empty.
 The companion's config flow warns about that at setup time, by checking the
 recorder's entity filter.
 
-### 4.5 Maintaining the companion
+### 4.5 Remote access: Home Assistant Cloud with a custom domain
+
+The user's HA is reached through one hostname everywhere. It's a custom
+domain on Home Assistant Cloud (Nabu Casa's remote UI, CNAMEd to their
+relay). At home, split-horizon DNS resolves the same name to the local
+instance, which also serves a valid certificate. So the app stores **one**
+`https://` URL, and the Docker server and the desktop app (at home or away)
+all use it unchanged. That's the setup this plan targets, and none of it is
+special-cased in code: the app just calls a URL.
+
+What this means for the design:
+
+- **The companion's endpoint is reachable from the internet.** The Cloud
+  remote UI relays every HTTP path to HA, custom integration views included.
+  The scoped secret (§2 #2) is what makes that acceptable, and it's the main
+  reason the companion exists rather than exposing a broad token. The relay
+  is end-to-end encrypted to the HA instance, so Nabu Casa's servers never
+  see the secret in the clear.
+- **Only HTTPS URLs are accepted, with one exception.** The app rejects an
+  `http://` base URL unless the host is a private-range IP address or
+  `localhost`. A secret sent as a header must not cross the internet in
+  plaintext, and this makes that mistake impossible to save.
+- **Certificates are verified normally.** Node's `fetch` checks the
+  certificate against its bundled CA list, which covers a public CA such as
+  Let's Encrypt on both paths. There's no "skip TLS verification" switch.
+  The Electron build runs the same server code on its bundled Node, so the
+  behaviour is the same there.
+- **The relay adds latency.** The timeout is 10 s (§6), not the 5 s you'd
+  pick for a LAN-only call. Recorder queries for a few days of two entities
+  are small, so there's plenty of headroom.
+- **If the Cloud subscription lapses,** only the away-from-home path breaks.
+  At home, split DNS still reaches the local instance. The app just reports
+  "unreachable" when away, with no data loss (§3).
+- **Phase 0 checks both paths** (§10): the endpoint over the Cloud relay from
+  outside the LAN (a phone hotspot), and over split DNS from inside it.
+
+### 4.6 Maintaining the companion
 
 It's a second codebase, but a small one. The HA internals it touches (views,
 config flows, the recorder history API) are the same ones HA's own core
@@ -192,7 +239,7 @@ pattern as `evnex_integration`:
 ```ts
 export const carOdometerIntegration = sqliteTable('car_odometer_integration', {
 	id: integer('id').primaryKey({ autoIncrement: true }),
-	baseUrl: text('base_url'), // e.g. http://192.168.1.10:8123, no trailing slash
+	baseUrl: text('base_url'), // e.g. https://ha.example.com; https required (§4.5)
 	secret: text('secret'), // companion secret; scoped to reading odometer history (§8)
 	enabled: integer('enabled', { mode: 'boolean' }).notNull().default(false),
 	lastReadAt: text('last_read_at'),
@@ -231,7 +278,8 @@ rebuild and the foreign-key caveat in `db/index.ts` doesn't come into play.
 
 This is pure and dependency-free, like `evnex.ts`, with a co-located
 `car-odometer.test.ts`. The impure edge, `car-odometer-client.ts`, is one
-`fetch` with a 5 s timeout plus response-shape checks.
+`fetch` with a 10 s timeout (the Cloud relay adds latency; §4.5) plus
+response-shape checks.
 
 ### 6.1 `toReadings(response)`: pairing the two histories
 
@@ -292,8 +340,12 @@ gets just the current state.
 - **Errors**, each with a specific message: `401` means "secret doesn't match —
   paste it again in HA"; `404` means the companion isn't installed or
   configured; a `version` mismatch means "update the companion"; a timeout
-  means HA is unreachable. A self-signed certificate on HA also shows up as a
-  connection error: there's no "skip TLS verification" switch.
+  means HA is unreachable. A certificate error shows up as a connection
+  error: there's no "skip TLS verification" switch.
+- **After a `401`, automatic calls stop.** `lastReadStatus = 'auth_failed'`
+  stops Pull from charger from calling the companion until **Test** succeeds
+  again. Rotating the secret in only one of the two places shouldn't turn
+  every pull into a failed request.
 
 **Test** calls `src/routes/settings/car-odometer/+server.ts` with `fetch`
 rather than running in `load`, for the same reason as `charge-points/+server.ts`:
@@ -313,8 +365,8 @@ a network dependency mustn't block page render.
 - **Pull from charger:** after the Evnex form action returns, the page posts
   to the same endpoint with `?apply=1`. The server runs §6.3, writes the
   `fill`s, and returns the `suggest`ions to pre-fill. The two stay as separate
-  requests so that HA being unreachable (the desktop app away from home)
-  never delays or fails an Evnex import. The result message gains "…N
+  requests so that HA being slow or unreachable never delays or fails an
+  Evnex import. The result message gains "…N
   odometers filled from car", or "Home Assistant unreachable — odometers not
   filled".
 - **Draft rows:** suggestions show pre-filled in _Add odometer_ with their
@@ -342,12 +394,13 @@ the chip slot already carries kind. Screenshot it in both themes (CLAUDE.md
 - The secret is 32 random bytes (`crypto.randomBytes`), base64url. It's never
   returned by a `load` function or rendered after setup, and never logged,
   including in error messages from a failed `fetch`.
-- Guessing is rate-limited by HA's own IP-ban mechanism (§4.2).
-- It's sent as a header, over plain `http://` on the LAN (as with the rest of
-  the app today) or over the user's HTTPS remote URL. If HA is exposed to the
-  internet (for example through Nabu Casa), the endpoint is too, protected by
-  the secret and the IP ban. That's the same as HA's own login page, with a
-  far smaller blast radius behind it.
+- It's sent as a header, over HTTPS with a valid certificate, whether through
+  the Home Assistant Cloud relay or split DNS at home (§4.5). Plain `http://`
+  is refused except to a private-range IP address.
+- The endpoint is reachable from the internet through the Cloud relay,
+  protected only by the secret. That's acceptable because the secret is 256
+  random bits and its blast radius is the table row above. It's deliberately
+  not wired into HA's IP ban (§4.2).
 
 ---
 
@@ -384,16 +437,16 @@ the chip slot already carries kind. Screenshot it in both themes (CLAUDE.md
 
 Each app phase lands green (`npm run check`, `npm run lint`, `npm run test`).
 
-| #   | Phase                                                                                                              | Notes                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
-| --- | ------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 0   | **Capture a real history by hand** (about 15 minutes, no code)                                                     | Using the user's own browser session or a temporary token that's deleted right after, `curl` HA's built-in `/api/history/period` for the two entities over a recent overnight charge. This confirms the entity IDs, the telemetry timestamp format, and that the charge window contains several unchanged odometer readings at the user's poll interval. The redacted output becomes the fixture for both repos. The temporary token never goes near the app. |
-| 1   | **The companion integration** (its own repo)                                                                       | View, config flow, options flow, tests, HACS metadata. Ends with the user installing it from HACS and `curl`-ing the endpoint with the secret.                                                                                                                                                                                                                                                                                                                |
-| 2   | App schema: `car_odometer_integration`, `odometer_source`, `started_at`/`ended_at` + the `planImport` pass-through | Migration only, plus the Evnex import populating the instants from then on.                                                                                                                                                                                                                                                                                                                                                                                   |
-| 3   | `car-odometer.ts` pure logic + full Vitest suite                                                                   | No network, no UI. It can run in parallel with Phase 1, using the Phase 0 fixture.                                                                                                                                                                                                                                                                                                                                                                            |
-| 4   | `car-odometer-client.ts` + the `/settings` card + Test                                                             | First real contact with the companion.                                                                                                                                                                                                                                                                                                                                                                                                                        |
-| 5   | **Read from car** in the Add form and on draft rows                                                                | The first payoff, and useful for public sessions even without Evnex.                                                                                                                                                                                                                                                                                                                                                                                          |
-| 6   | Auto-fill after **Pull from charger** + provenance icon                                                            | The main payoff: a home session goes from charger to complete with no typing.                                                                                                                                                                                                                                                                                                                                                                                 |
-| 7   | Playwright verification (server and Electron builds) + §12 documentation                                           |                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| #   | Phase                                                                                                              | Notes                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| --- | ------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 0   | **Capture a real history by hand** (about 15 minutes, no code)                                                     | Using the user's own browser session or a temporary token that's deleted right after, `curl` HA's built-in `/api/history/period` for the two entities over a recent overnight charge, once through the Cloud URL from outside the LAN (a phone hotspot) and once from inside it. This confirms both network paths (§4.5), the entity IDs, the telemetry timestamp format, and that the charge window contains several unchanged odometer readings at the user's poll interval. The redacted output becomes the fixture for both repos. The temporary token never goes near the app. |
+| 1   | **The companion integration** (its own repo)                                                                       | View, config flow, options flow, tests, HACS metadata. Ends with the user installing it from HACS and `curl`-ing the endpoint with the secret.                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| 2   | App schema: `car_odometer_integration`, `odometer_source`, `started_at`/`ended_at` + the `planImport` pass-through | Migration only, plus the Evnex import populating the instants from then on.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| 3   | `car-odometer.ts` pure logic + full Vitest suite                                                                   | No network, no UI. It can run in parallel with Phase 1, using the Phase 0 fixture.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| 4   | `car-odometer-client.ts` + the `/settings` card + Test                                                             | First real contact with the companion.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| 5   | **Read from car** in the Add form and on draft rows                                                                | The first payoff, and useful for public sessions even without Evnex.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| 6   | Auto-fill after **Pull from charger** + provenance icon                                                            | The main payoff: a home session goes from charger to complete with no typing.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| 7   | Playwright verification (server and Electron builds) + §12 documentation                                           |                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
 
 ---
 
