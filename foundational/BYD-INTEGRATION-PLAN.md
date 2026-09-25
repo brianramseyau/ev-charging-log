@@ -1,16 +1,15 @@
-# BYD Vehicle Integration — Design & Implementation Plan
+# BYD Odometer Integration (via Home Assistant) — Design & Implementation Plan
 
-Status: **scoped, not started. Phase 0 (a throwaway spike against the real
-account, §11) has to happen before any app code.** Several of the answers
-below are marked _verify in spike_ because only the real car can settle them.
+Status: **scoped, not started.** Confirmed: the user already runs the
+[`hass-byd-vehicle`](https://github.com/jkaberg/hass-byd-vehicle) Home Assistant
+integration and it reads the odometer from this car.
 Branch: `claude/byd-car-km-integration-pd6prj`
 
 Builds on [EVNEX-INTEGRATION-PLAN.md](EVNEX-INTEGRATION-PLAN.md), which already
 made the odometer nullable, added the draft-session flow, and set the pattern
-for an unofficial third-party API (a separate typed client package, pure logic
-in `src/lib/server/`, credentials entered through `/settings`). This plan
-reuses all of that. See [§13](#13-documentation-to-update) for the
-documentation edits owed once it lands.
+for an integration configured through `/settings`. See
+[§12](#12-documentation-to-update) for the documentation edits owed once this
+lands.
 
 ---
 
@@ -18,325 +17,154 @@ documentation edits owed once it lands.
 
 Since the Evnex integration, a home session arrives as a draft that already has
 date, time, kWh and location. The one thing left to type is the **odometer**,
-and the charger has no way to know it. The car does: BYD's cloud reports the
-odometer (`totalMileage`) to the BYD app, and that API has been
-reverse-engineered by the Home Assistant community.
+and the charger has no way to know it. The car does, and the user's Home
+Assistant already collects it every few minutes.
 
 Goal: **fill in the odometer from the car so a home session needs no typing at
 all**, and let a manually-logged public session fetch the reading with a tap
 instead of the user reading the dash.
 
-Non-goals: remote control (lock, climate and so on), GPS/location, battery %,
-range, tyre pressure, and anything else the BYD API offers. This integration
-reads one number.
+Non-goals: anything else the car or Home Assistant exposes (location, battery,
+range, climate, locks). This integration reads one sensor, plus an optional
+timestamp sensor that tells us how fresh that reading is.
 
-## 2. Proposed decisions
+## 2. Decisions
 
-These are the defaults the rest of the document is written against. Items 2
-and 3 need a decision from you (§12, #1 and #2); the rest follow from how the
-API works.
-
-| #   | Decision                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
-| --- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 1   | **Read-only, odometer only.** No control PIN is ever asked for or stored, and no command endpoint is ever called. The client package won't even contain command code (§5).                                                                                                                                                                                                                                                                                        |
-| 2   | **The app uses a dedicated BYD account, shared from the owner's account with the least permissions that still expose vehicle status.** In practice this isn't optional. BYD allows one live session per account, so this app signing in would log the phone app out (the HA integration's README gives the same warning), and §4.3 means that would happen on every re-login. A shared account also limits the damage if its stored password (item 3) ever leaks. |
-| 3   | **The BYD password is persisted**, unlike the Evnex password. The BYD login has no refresh token (§4.3): when the session expires, the only way back in is a fresh login, and that needs the password in plaintext. The alternative is asking for the password every time the session lapses (§12 #1).                                                                                                                                                            |
-| 4   | **A car reading is only written to a session automatically when it provably belongs to that session.** That means the car reported it while that charge was running (§7.2). Any other reading is shown in the odometer field as a pre-filled suggestion that the user confirms. Odometer values end up on the lease report, and the user has already been caught out by mistyped data (commit `946adcb`), so a silently wrong value is worse than an empty one.   |
-| 5   | **The API calls go in a separate `byd-client` npm package**, a TypeScript port of the relevant parts of [`jkaberg/pyBYD`](https://github.com/jkaberg/pyBYD). This follows the `evnex-client` / `typescript-evnex` precedent, keeping the crypto and wire format out of this app. The app then gets `byd.ts` (pure logic), `byd-auth.ts`/`byd-client.ts` (impure edges) and `byd-token.ts` (the one DB-touching helper), mirroring the Evnex files one-for-one.    |
-| 6   | **No background polling in the first release.** Reads happen when the user asks: the **Read from car** button, and a car read piggybacked on **Pull from charger**. A background sampler that can fill drafts with no interaction is Phase 6, gated on the spike's battery-drain and data-freshness findings (§12 #3).                                                                                                                                            |
-| 7   | **No new deployment configuration.** As with Evnex, it's configured entirely through `/settings`, identically on Docker/Unraid and the Electron build.                                                                                                                                                                                                                                                                                                            |
+| #   | Decision                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| --- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1   | **The app reads the odometer from Home Assistant's REST API, not from BYD directly.** HA's REST API is official, documented and stable, and the user already runs `hass-byd-vehicle`. Talking to BYD directly would mean porting BYD's scrambled protocol from `pyBYD`, storing a plaintext BYD password, and running a second BYD account so this app doesn't log out HA or the phone app. HA has already done all of that. The direct route is recorded in [Appendix A](#appendix-a-the-direct-byd-api-route-not-taken) in case HA is ever retired. |
+| 2   | **HA's recorder history is the matching engine.** HA records the odometer every time it changes and the car's telemetry timestamp every time the car reports. Together those show what the odometer read _while a given charge was running_. That's exact, and it needs no scheduler in this app: HA already polls the car (§6).                                                                                                                                                                                                                      |
+| 3   | **A reading is only written to a session automatically when it provably belongs to that session**, meaning the car reported fresh telemetry while that charge was running (§6.2). Anything else pre-fills the odometer field as a suggestion that the user confirms. Odometer values end up on the lease report, and a silently wrong value is worse than an empty one.                                                                                                                                                                               |
+| 4   | **Read-only.** The app only ever calls HA's `GET` state and history endpoints, never `POST /api/services/…`. That can't be enforced from HA's side, since long-lived tokens have no scopes (§8), so it's enforced by the client module having no code path that sends anything else.                                                                                                                                                                                                                                                                  |
+| 5   | **No npm package, no new dependency.** HA's REST API is a handful of plain `fetch` calls with a Bearer token. It gets one small impure module, `home-assistant.ts`, rather than the separate-package treatment `evnex-client` needed.                                                                                                                                                                                                                                                                                                                 |
+| 6   | **No new deployment configuration.** The HA URL and token are entered in `/settings`, identically on Docker/Unraid and the Electron build.                                                                                                                                                                                                                                                                                                                                                                                                            |
 
 ## 3. What the user does, end to end
 
 One-time setup:
 
-1. In the BYD app, creates (or reuses) a second BYD account and shares the car
-   with it from the owner account (§4.8). The README will cover this step.
-2. Opens `/settings`, finds a new **BYD vehicle** heading below the Evnex one,
-   and enters that account's email/phone, password, and country (default
-   Australia).
-3. The app signs in, generates and stores a device fingerprint (§4.7), and lists
-   the vehicles on the account. The user picks theirs (usually the only one).
-   A **Test read** button shows the current odometer and when the car reported
-   it, so the user can check it matches the dash before trusting it.
+1. In Home Assistant, creates a long-lived access token (Profile → Security →
+   Long-lived access tokens). §8 recommends creating a dedicated non-admin HA
+   user for this first.
+2. Opens `/settings`, finds a new **Car odometer (Home Assistant)** heading
+   below the Evnex one, and enters the HA URL (for example
+   `http://192.168.1.10:8123`) and the token.
+3. The app checks the connection and lists candidate odometer sensors (§4.3).
+   The BYD **Odometer** sensor is preselected, as is its **Telemetry last
+   updated** partner from the same car. A **Test read** shows
+   "118,204 km, car reported 6 min ago" so the user can check it against the
+   dash.
 4. Switches the integration on and saves.
 
 Day to day:
 
 - **Home, with Evnex:** taps **Pull from charger** on `/sessions` as today.
-  Once the Evnex import finishes, the page also reads the car. New drafts whose
-  charge window contains the car's reading get their odometer filled in and
-  complete with no typing at all. Other drafts get a **From car** suggestion in
-  their _Add odometer_ field (§8.2).
+  Once the import finishes, the page asks the server to fill odometers. Every
+  draft whose charge HA observed gets its exact odometer and completes. The
+  rest get a **From car** suggestion in their _Add odometer_ field.
 - **Public, or home without Evnex:** in the Add form, taps **Read from car**
-  next to the Odometer field. The field fills with the reading and a hint
-  saying how old it is. The user saves as normal.
+  next to the Odometer field. It fills with HA's current value and a hint
+  saying how old the car's data is.
 
 ---
 
-## 4. API contract
+## 4. The Home Assistant side
 
-### 4.0 This API is unofficial, and more fragile than Evnex's
+### 4.1 What `hass-byd-vehicle` exposes
 
-There is no published spec. Everything here comes from `pyBYD` (MIT, used by
-[`jkaberg/hass-byd-vehicle`](https://github.com/jkaberg/hass-byd-vehicle),
-which pins `pybyd==0.0.75`). It's cross-checked against
-[`TA2k/ioBroker.byd`](https://github.com/TA2k/ioBroker.byd) (MIT, a JavaScript
-implementation), and both credit
-[`Niek/BYD-re`](https://github.com/Niek/BYD-re) for the original reverse
-engineering.
+From `custom_components/byd_vehicle/sensor.py` and `translations/en.json`:
 
-It's riskier than Evnex in ways that matter for planning:
+| Entity (name in HA)        | Key             | Details                                                                                                                      |
+| -------------------------- | --------------- | ---------------------------------------------------------------------------------------------------------------------------- |
+| **Odometer**               | `total_mileage` | `device_class: distance`, `state_class: total_increasing`, native unit `km`, integer-rounded, from the realtime poll.        |
+| **Telemetry last updated** | `last_updated`  | `device_class: timestamp`, diagnostic. Its _value_ is when the car produced the realtime data, as opposed to when HA polled. |
 
-- **The transport is obfuscated.** The API isn't plain JSON over HTTPS. Every
-  request and response is wrapped in a "Bangcle" envelope encrypted with a
-  white-box AES whose lookup tables were extracted from BYD's Android native
-  library (§4.2). If BYD rotates those tables in an app update, every client
-  breaks until someone extracts new ones. We can't fix that ourselves.
-- **The client pretends to be a specific app version on a specific phone.**
-  `pyBYD` bumps its `appVersion` string regularly (its latest commit is "bump
-  byd app version"). An outdated version string could be rejected
-  server-side, which means an occasional forced upgrade of `byd-client`.
-- **Using it is almost certainly against BYD's terms.** The realistic worst
-  case is the account being banned. Using a dedicated shared account (§2 #2)
-  confines that to an account nobody else uses.
-- **Field meanings are still being mapped upstream** (the HA README links
-  pyBYD issue #20). The odometer field itself is well established across all
-  three projects (HA exposes it as a sensor, and ioBroker's captured
-  vehicle-list sample includes `"totalMileage": 13060`), but its units and
-  sentinel values need defensive handling (§4.5).
+Every entity from the integration has a `vin` attribute (`entity.py`), which
+is how the app ties the two together.
 
-### 4.1 Endpoints and region
+Entity IDs depend on the car's name in HA (something like
+`sensor.sealion_7_odometer`), so they're chosen in `/settings`, never
+hard-coded.
 
-The API host is chosen per region. For Australia (HA's `NODE_METADATA` node 3):
+HA's default poll interval for the integration is 300 s. That matters for §6:
+the exact rule needs at least one fresh telemetry report _during_ each charge.
+A home charge lasts hours, so the default is plenty. If the user has turned the
+interval up to several hours to save battery, short charges will fall back to
+suggestions. That's safe, just less automatic.
 
-|                  | Value                                                                                                     |
-| ---------------- | --------------------------------------------------------------------------------------------------------- |
-| Base URL         | `https://dilinkappoversea-au.byd.auto`                                                                    |
-| Country code     | `AU`                                                                                                      |
-| Transport        | `POST {base}{endpoint}`, body `{"request": "<Bangcle envelope>"}`                                         |
-| Required headers | `content-type: application/json; charset=UTF-8`, `user-agent: okhttp/4.12.0`, `accept-encoding: identity` |
-| Cookies          | Kept across calls in a cookie jar (pyBYD relies on its session's jar)                                     |
+### 4.2 Endpoints used
 
-Store the base URL and country together as a `region` choice. Don't make them
-free-text: getting the region wrong shows up as an _authentication_ failure,
-not a clear error (HA's troubleshooting tip is "verify credentials first, then
-verify selected country").
+All calls are `GET`, with `Authorization: Bearer <token>`. The API is documented
+at developers.home-assistant.io → REST API.
 
-### 4.2 Wire format: four layers
+| Purpose             | Request                                                                                                                                                    |
+| ------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Connection check    | `GET /api/`, which returns `{"message": "API running."}`. A 401 means a bad token.                                                                         |
+| Sensor picker       | `GET /api/states`, filtered client-side (§4.3)                                                                                                             |
+| Current reading     | `GET /api/states/<odometer>` and `GET /api/states/<telemetry>`                                                                                             |
+| History for a draft | `GET /api/history/period/<start ISO>?end_time=<end ISO>&filter_entity_id=<odometer>,<telemetry>&minimal_response&no_attributes&significant_changes_only=0` |
 
-Taken from pyBYD's `_transport.py`, `_api/login.py`, `_api/_envelope.py` and
-`_crypto/*`:
+History quirks to handle:
 
-1. **Inner payload.** A JSON object of request fields (VIN, timestamps, a
-   random nonce, device fields), encrypted with standard AES-128-CBC, zero IV,
-   PKCS7, uppercase hex, and sent as `encryData`.
-   - Login key: `MD5(MD5(password))` (uppercase hex).
-   - Post-login key ("content key"): `MD5(encryToken)`.
-2. **Signature.** The inner fields plus some outer fields, sorted by key and
-   joined as `k=v&…&password=<key>`, then passed through a nonstandard SHA-1
-   ("mixed case", with some zero characters dropped; see `sha1_mixed`). The
-   key is `MD5(password)` at login and `MD5(signToken)` afterwards.
-3. **Checkcode.** An MD5 of the compact outer JSON with its hex digest split
-   into four 8-character chunks and reordered `[24:32] + [8:16] + [16:24] + [0:8]`.
-   The whole outer object is serialized with Python's
-   `json.dumps(separators=(",", ":"), ensure_ascii=False)`, and **key order
-   matters**, because the checkcode is computed over that exact serialization.
-   `JSON.stringify` preserves insertion order, so the TypeScript port has to
-   build the outer object in pyBYD's field order.
-4. **Bangcle envelope.** The outer JSON, PKCS7-padded, encrypted with the
-   white-box AES in CBC mode with a zero IV, base64-encoded, and prefixed with
-   `F`. The response comes back the same way under `"response"`; decoding
-   yields `{code, message, respondData}`, and `respondData` is AES-hex
-   decrypted with the key from layer 1. There's one quirk: a stray leading `F`
-   occasionally appears on the decoded JSON and has to be stripped.
+- **The first entry for each entity is the state in effect at `start`**,
+  because HA includes the start-time state by default, with its
+  `last_changed` clamped to `start`. That's the value we want at plug-in.
+- `minimal_response` drops `entity_id` from every entry after the first in
+  each inner array, so match arrays by their first element, not by position.
+- `significant_changes_only=0` makes sure every recorded change comes back.
+- Timestamps are ISO with an offset (UTC). Parse with `Date`; never compare
+  them as strings.
+- **Retention:** the HA recorder keeps 10 days by default (`purge_keep_days`).
+  A draft older than that has no history. The Evnex lookback default of 3
+  days sits comfortably inside it, but an old draft finished late has to
+  degrade to "no data", not fail.
 
-The white-box tables total about 830 KB (`bangcle_tables.bin` in pyBYD, and
-the same data base64-embedded in ioBroker's `bangcle_auth_tables.js`). They're
-data, not a key we can derive, so they ship with the client package (§5).
+### 4.3 Picking the sensors
 
-Layers 1–3 use Node's built-in `crypto` (`aes-128-cbc`, `md5`, `sha1`), so
-there's no dependency to add. Layer 4 is about 300 lines of table-lookup code.
-ioBroker's `lib/bangcle.js` is already JavaScript and makes a near-direct
-reference for it.
+From `GET /api/states`, offer as odometer candidates the entities where
+`attributes.device_class === 'distance'`,
+`attributes.state_class === 'total_increasing'`, and
+`attributes.unit_of_measurement === 'km'`, sorted with any that also carry a
+`vin` attribute first. The telemetry candidates are the `device_class ===
+'timestamp'` entities with the **same `vin`**. If exactly one pair matches,
+preselect it.
 
-### 4.3 Login and session lifetime: there is no refresh token
+This filter isn't BYD-specific, so any HA odometer sensor would work (another
+car make, or an OBD dongle). That's a free side effect, and the design
+doesn't depend on it.
 
-`POST /app/account/login` with `functionType: "pwdLogin"`. A successful
-response yields `{ userId, signToken, encryToken }`, and every later request
-is keyed off those three values.
+### 4.4 Reading values defensively
 
-What makes this unlike Evnex:
-
-- **The plaintext password goes over the wire.** pyBYD sends it as the outer
-  `signKey` field, inside the Bangcle envelope, and derives two keys from it.
-  A stored hash won't do: every login needs the password itself.
-- **There's no refresh flow.** When the session dies, the API returns code
-  `1002`, `1005` or `1010` (pyBYD's `SESSION_EXPIRED_CODES`), and the client
-  logs in again. pyBYD also re-logs in proactively after a 12-hour TTL, but
-  that's a client-side guess, not a server-documented lifetime. **The real
-  server-side lifetime needs measuring in the spike.** If tokens turn out to
-  last weeks, "ask for the password again when the session lapses" becomes
-  bearable (§12 #1).
-- **Retry exactly once.** On a session-expired code: log in again, retry the
-  call once, and if that fails, record it as an auth failure. This matches
-  pyBYD's `_call_with_reauth` and the Evnex client's one-retry rule. Never
-  loop: repeated failed logins against a consumer account are how accounts
-  get locked.
-- A non-zero `code` at login is an authentication failure (wrong password or
-  wrong region). Other codes worth mapping: `1001` endpoint not supported for
-  this vehicle, `1008` service busy, `6002` vehicle unreachable.
-
-### 4.4 Endpoints used
-
-Only these three. Everything else pyBYD supports is out of scope.
-
-| Purpose        | Endpoint                                                                                         | Notes                                                                                                                                                                                                   |
-| -------------- | ------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Sign in        | `/app/account/login`                                                                             | §4.3                                                                                                                                                                                                    |
-| Vehicle list   | `/app/account/getAllListByUserId`                                                                | VIN, `autoAlias`, `autoPlate`, `modelName`, `energyType`, **`totalMileage`**, `vehicleTimeZone`. One call, no polling.                                                                                  |
-| Realtime state | `/vehicleInfo/vehicle/vehicleRealTimeRequest`, then `/vehicleInfo/vehicle/vehicleRealTimeResult` | Trigger, then poll using the returned `requestSerial` (pyBYD polls up to 10 times at 1.5 s). The result carries `totalMileage`, `onlineState`, `chargeState` and **`time`** (the car's data timestamp). |
-
-pyBYD waits for MQTT first and falls back to HTTP polling. **We use HTTP
-polling only.** MQTT would need a long-lived broker connection with its own
-key handling, which a request/response SvelteKit app has nowhere to keep, and
-a realtime read taking up to ~15 s is fine behind a spinner (§8).
-
-**Which source to read the odometer from: _verify in spike_.** The vehicle
-list is one cheap call and ioBroker's captured sample shows it carries
-`totalMileage`, but nothing shows how fresh that value is, and it has no
-timestamp. The realtime result has the timestamp (`time`) that §7.2's matching
-rule needs. The spike should call both repeatedly over a few days and
-answer three questions:
-
-1. Does the vehicle-list `totalMileage` track the realtime value, and how far
-   does it lag?
-2. Does a realtime trigger against a sleeping car return the cached last-known
-   state with a `time` from when it was parked (useful and harmless), or does
-   it wake the car?
-3. What does `time` look like: epoch seconds or milliseconds, and UTC?
-
-The default design uses the realtime result for anything that fills a
-session, and the vehicle list only for the Test read (§3) and as a fallback
-suggestion.
-
-### 4.5 The odometer fields: units and sentinel values
-
-- `totalMileage` is a number in km for AU-region cars. `totalMileageV2` comes
-  with an explicit `totalMileageV2Unit`. **If a unit field is present and
-  isn't km, reject the reading** (don't convert it). A miles/km mixup on a
-  lease report is exactly the kind of error that's worse than a blank.
-- **`0` and negative values mean "no data", not a reading.** pyBYD's
-  `_ZERO_DROP_FIELD_NAMES` includes `total_mileage` and `total_mileage_v2`,
-  and `-1` is BYD's usual "unavailable" sentinel, especially on post-wake
-  and deep-sleep payloads. Treat either as absent. This is the opposite of
-  Evnex's rule, where `0` kWh is a real reading, so it needs its own tests.
-- Whole km in practice. The column is `real`, so nothing needs to change.
-
-### 4.6 Waking the car and battery drain
-
-HA's `const.py` comments that frequent polling "wakes the car", measured at
-about 0.1 kWh/h at a 300 s interval, and raised its max interval to 8 hours
-for that reason. ioBroker added "sleep/wake protection" and skips the
-follow-up polling when the trigger response says `onlineState === 2`
-(sleeping). We adopt the same guard. If the trigger response says the car is
-asleep, use whatever state it returned and don't poll further.
-
-Because Phase 1 only reads when the user taps a button, drain there is
-negligible. It only becomes a real concern for the Phase 6 background sampler.
-
-### 4.7 Device fingerprint
-
-Every request carries fake Android device fields (`imei`, `mac`,
-`mobileBrand`, `mobileModel`, `osVersion`, …), plus an `imeiMD5` that pyBYD
-derives from the username. HA generates a **random but realistic profile once
-per account** from a curated device pool, and backfills and persists it for
-older installs. We do the same: generate at first sign-in, store it as JSON
-on the integration row, and reuse it forever. A device identity that changes
-on every login looks like a new phone each time, which is exactly what
-account-security heuristics flag.
-
-### 4.8 Shared accounts
-
-A BYD owner can share the vehicle with another account, and that account's
-permissions come back in the vehicle list as `rangeDetailList` (pyBYD's
-`Vehicle.is_shared` is `empowerType < 0`). _Verify in spike:_ that the
-narrowest share still exposes realtime data including `totalMileage`. If it
-doesn't, fall back to the smallest share that does, and write down in the
-README exactly what that share can do.
+- The state is a string. Accept it only if it parses to a finite number
+  `> 0`. `unavailable`, `unknown`, `0` and negative values mean "no reading"
+  (the BYD API sends `0`/`-1` placeholders on wake-up; `hass-byd-vehicle`
+  mostly filters these, but not in every path).
+- **The unit has to be `km`.** HA can convert units into the user's display
+  system, so a changed HA unit setting or a per-entity override could make
+  it report miles. If the unit isn't `km`, reject the reading with a clear
+  message instead of converting it.
+- The value is whole km, and `odometer_km` is `real`, so nothing needs to
+  change there.
 
 ---
 
-## 5. The `byd-client` package
+## 5. Data model
 
-It lives in its own repo (e.g. `brianramseyau/typescript-byd`, alongside
-`typescript-evnex`) and is published as `byd-client`. It's a **deliberately
-narrow** port of pyBYD:
+### 5.1 New table: `home_assistant_integration`
 
-| In scope                                                                                                                                | Out of scope                                      |
-| --------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------- |
-| Bangcle codec + embedded tables                                                                                                         | All remote commands, control PIN, MQTT            |
-| Inner AES, `sha1_mixed`, sign string, checkcode                                                                                         | GPS, HVAC, charging schedules, push notifications |
-| `login()` returning a serialisable session `{ userId, signToken, encryToken }`                                                          | Energy-consumption endpoint                       |
-| `getVehicles()`, `getRealtime(vin)` (trigger + HTTP poll, sleep guard)                                                                  |                                                   |
-| One re-login on `SESSION_EXPIRED_CODES`, surfaced through an `onSessionUpdate` callback, same shape as `evnex-client`'s `onTokenUpdate` |                                                   |
-| zod schemas for the three responses, lenient: unknown fields are ignored and sentinels are normalised to `null`                         |                                                   |
-| Device-profile generator (the pool and Luhn-valid IMEI from HA's `device_fingerprint.py`)                                               |                                                   |
-| Exported error classes: `BydAuthError`, `BydSessionExpiredError`, `BydApiError(code)`, `BydTransportError`                              |                                                   |
-
-**Testing the port.** pyBYD has no crypto test vectors, so we generate them:
-a small Python script (kept in the package repo, not this one) runs pyBYD's
-`BangcleCodec`, `aes_encrypt_hex`, `sha1_mixed`, `compute_checkcode` and
-`build_login_request` (with a fixed clock and nonce) over a set of inputs,
-and writes golden JSON. The TypeScript tests have to reproduce those vectors
-byte for byte, including checkcode sensitivity to key order (§4.2 layer 3).
-That settles almost every port bug before we contact the real API.
-
-**Licensing.** pyBYD and ioBroker.byd are both MIT, so we keep their notices.
-The tables come from BYD's own app. That's the same position every one of
-these projects is in, but it's worth writing down once in the package README.
-
-**Packaging.** The tables go in as a binary asset loaded with
-`fs.readFile(new URL('./bangcle_tables.bin', import.meta.url))`. That's
-smaller than ioBroker's 1.1 MB base64 `.js`, and it keeps the tables out of
-the JS parse. Phase 2 has to confirm the file survives Vite's SSR bundle, the
-Docker image and the Electron `asar` package; the `evnex-client` package has
-no binary assets, so nothing we've built so far has tested this.
-
----
-
-## 6. Data model
-
-### 6.1 New table: `byd_integration`
-
-It's a single row, following the same pattern as `evnex_integration`, and
-separate from it because the lifecycles are independent.
+It's a single row, following the same pattern as `evnex_integration`:
 
 ```ts
-export const bydIntegration = sqliteTable('byd_integration', {
+export const homeAssistantIntegration = sqliteTable('home_assistant_integration', {
 	id: integer('id').primaryKey({ autoIncrement: true }),
-
-	// User-chosen, via /settings
-	username: text('username'), // email or phone, shown in /settings
-	region: text('region', { enum: ['AU' /* extend as needed */] })
-		.notNull()
-		.default('AU'),
-	vin: text('vin'), // chosen vehicle
-	vehicleName: text('vehicle_name'), // autoAlias / modelName, cached for display
+	baseUrl: text('base_url'), // e.g. http://192.168.1.10:8123, no trailing slash
+	accessToken: text('access_token'), // long-lived token; a credential, see §8
+	odometerEntityId: text('odometer_entity_id'),
+	telemetryEntityId: text('telemetry_entity_id'), // optional; without it nothing is "exact"
+	vehicleName: text('vehicle_name'), // friendly_name, cached for display
 	enabled: integer('enabled', { mode: 'boolean' }).notNull().default(false),
 
-	// Credentials: never sent to the browser, never logged (§9)
-	password: text('password'), // plaintext; required for re-login (§4.3). See §12 #1.
-	deviceProfile: text('device_profile', { mode: 'json' }), // §4.7, generated once
-	userId: text('user_id'),
-	signToken: text('sign_token'),
-	encryToken: text('encry_token'),
-	sessionIssuedAt: text('session_issued_at'), // ISO; informs the spike's lifetime measurement
-
-	// Last read, for the /settings status line and the "From car" hint
-	lastOdometerKm: real('last_odometer_km'),
-	lastOdometerAt: text('last_odometer_at'), // ISO UTC, the CAR's timestamp, not ours
-	lastReadAt: text('last_read_at'), // ISO UTC, when we asked
+	lastReadAt: text('last_read_at'),
 	lastReadStatus: text('last_read_status', {
 		enum: ['ok', 'auth_failed', 'network_error', 'api_error', 'no_data']
 	}),
@@ -344,236 +172,285 @@ export const bydIntegration = sqliteTable('byd_integration', {
 });
 ```
 
-### 6.2 `charging_sessions`: record where the odometer came from
+It's generic HA state, not BYD state, which is why it isn't named
+`byd_integration`. A later HA-sourced feature could reuse the connection
+columns.
 
-This adds `odometerSource: text('odometer_source', { enum: ['manual', 'car'] })`,
-nullable. Existing rows stay `NULL`, which reads as manual. It's the "source
-column" the Evnex plan deferred "until a second integration appears"
-(EVNEX-INTEGRATION-PLAN.md §12 #2), scoped to the one field it concerns.
-Why bother: when a lease-company query asks "where did this odometer figure
-come from?", the answer shouldn't depend on memory. The chip in §8.3 reads
-it. It's a plain `ALTER TABLE … ADD COLUMN`, so there's no table rebuild and
-the foreign-key caveat in `db/index.ts` doesn't come into play.
+### 5.2 `charging_sessions`: two changes
 
-The Evnex drafts don't persist the session's start and end instants, only
-the local `date`/`time`. Phase 1 doesn't need them, because it matches at
-pull time, while the Evnex payloads (which include `endDate`) are in memory.
-**Phase 6 does** (§7.3), and it'll add nullable `started_at`/`ended_at` ISO
-columns filled for imported sessions. That's deferred until then rather than
-added speculatively.
+1. **`odometer_source`**: `text('odometer_source', { enum: ['manual', 'car'] })`,
+   nullable, with existing rows staying `NULL` (which reads as manual). It
+   answers "where did this odometer figure come from?" for the lease company
+   without relying on memory, and the history list's provenance icon (§7.3)
+   reads it. This is the "source column" the Evnex plan deferred until a
+   second integration appeared (EVNEX-INTEGRATION-PLAN.md §12 #2), scoped to
+   the one field it concerns.
+2. **`started_at` / `ended_at`**: nullable ISO UTC instants, filled by the Evnex
+   import from `startDate`/`endDate`. Right now an imported draft only keeps
+   local `date`/`time`, which is enough for billing but not for asking HA
+   "what happened during this charge?". Converting local strings back into
+   instants breaks across DST changes (the Evnex plan's §6.3 trap run in
+   reverse), so we store the instants the charger gave us. Manual sessions
+   leave them `NULL`, since the Add form's **Read from car** doesn't need
+   them.
+   - Backfill: nothing. Existing completed drafts don't need matching, and a
+     still-open imported draft picks the columns up on the next poll, via a
+     small `planImport` change: an existing row with `started_at IS NULL` gets
+     it set, alongside the existing kWh-update path.
 
-### 6.3 Not needed yet: a readings history table
-
-A `byd_odometer_readings` table (one row per sample) is what makes background
-matching work (Phase 6). Phase 1 only needs the latest reading, which lives on
-`byd_integration`. The table gets added in Phase 6, together with the sampler
-that fills it.
+Both are plain `ALTER TABLE … ADD COLUMN`s, so there's no table rebuild and the
+foreign-key caveat in `db/index.ts` doesn't come into play.
 
 ---
 
-## 7. Matching a reading to a session: `src/lib/server/byd.ts`
+## 6. Matching logic: `src/lib/server/car-odometer.ts`
 
 This is pure and dependency-free, like `evnex.ts`, with a co-located
-`byd.test.ts`.
+`car-odometer.test.ts`. `home-assistant.ts` fetches the data, and this file
+decides what to do with it.
 
-### 7.1 Normalising a reading
+### 6.1 Inputs
 
 ```ts
-interface CarReading {
-	km: number; // > 0, km. Anything else is rejected before this type exists.
-	reportedAt: string; // ISO UTC, from the car's `time` field
-	source: 'realtime' | 'vehicle_list';
+interface StateChange { value: string; at: string } // one history entry; `at` = last_changed, ISO
+
+interface DraftWindow {
+	id: number;
+	startedAt: string; // ISO UTC
+	endedAt: string;   // ISO UTC
 }
 
-function toCarReading(raw: …): CarReading | { rejected: 'no_data' | 'bad_unit' | 'no_timestamp' };
+// Per draft: odometer history and telemetry history over [startedAt, endedAt]
+planOdometerFill(
+	drafts: DraftWindow[],
+	history: Map<number, { odometer: StateChange[]; telemetry: StateChange[] }>,
+	neighbours: …  // for the isOdometerBelowLastRecorded check
+): { fill: { id: number; km: number }[]; suggest: { id: number; km: number; reason: string }[]; skipped: … }
 ```
 
-A vehicle-list reading has no `time` field. It gets `reportedAt = fetchedAt`
-and `source: 'vehicle_list'`, and `planOdometerFill` only ever treats it as a
-suggestion, never as exact (§7.2).
+### 6.2 The rule
 
-### 7.2 The rule: exact vs. suggestion
+The car can't move while it's charging. So if the car sent **fresh
+telemetry during the charge**, the odometer HA held right after that report
+is exactly the plug-in odometer.
 
-The car can't move while it's charging. So if the car reported a reading at
-an instant inside a charge's `[startDate, endDate]`, that reading is exactly
-that session's plug-in odometer. Anything else is a guess.
+| Outcome   | When                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| --------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `fill`    | There's at least one telemetry entry whose **value** (the car's own timestamp, not HA's `last_changed`) falls inside `[startedAt, endedAt]`, **and** the odometer in effect at that instant is a valid reading (§4.4), **and** every valid odometer reading inside the window is that same value (the car didn't move), **and** it passes `isOdometerBelowLastRecorded` against the session's neighbours. Written with `odometer_source = 'car'`. |
+| `suggest` | No proof of freshness, but the odometer in effect at `startedAt` is a valid reading that passes the neighbour check. The value is pre-filled in the draft's input with the hint _"From car — not confirmed during this charge"_, and is never saved without the user tapping it. This is also what happens with no telemetry entity configured.                                                                                                   |
+| `skip`    | No valid reading at all: outside recorder retention, entity unavailable the whole time, wrong unit, or a value below the previous session's odometer.                                                                                                                                                                                                                                                                                             |
 
-`planOdometerFill(reading, drafts, existing)` returns, for each draft missing
-an odometer, one of the following:
+Why the telemetry value rather than HA's `last_changed`: HA can re-poll and get
+the same _stale_ cloud data back while the car is asleep. HA's timestamps say
+when HA looked; the telemetry value says when the car last reported. Only the
+second proves the car was in that state during the charge.
 
-| Outcome   | When                                                                                                                                                                                                                                                           |
-| --------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `fill`    | `reading.source === 'realtime'` **and** `startDate <= reportedAt <= endDate` (a still-charging session counts as `endDate = now`), **and** the km passes `isOdometerBelowLastRecorded` against the session's neighbours. Written with `odometerSource: 'car'`. |
-| `suggest` | Not exact, but plausible: the draft is the **most recent** session, the reading is after its start, and the km isn't below the last recorded odometer. The value is pre-filled in the draft's input, never saved without the user tapping it.                  |
-| `skip`    | Everything else, including older drafts. A reading from today says nothing about last Tuesday's odometer.                                                                                                                                                      |
+Deliberately **not** used as evidence: the BYD charging-state sensors.
+`pyBYD` itself notes that the "gun connected" value "does not change when the
+charging gun is disconnected", and other implementations disagree about which
+field to trust. Timestamps and odometer ordering are the only evidence the
+rule uses.
 
-Deliberately **not** used as evidence: `chargeState`. pyBYD's own enum
-comment says the "connected" value `15` "does not change when the charging
-gun is disconnected, so we should not rely on it". (ioBroker's README claims
-the opposite; the disagreement is the reason to stay out of it.) Timestamps
-and odometer ordering are the only evidence the rule uses.
+### 6.3 Read from car (Add form, draft rows)
 
-Instants are compared as instants (ISO UTC). Local `date`/`time` strings are
-never compared: the Evnex plan's §6.3 timezone trap applies unchanged, and
-converting for display uses the same `formatToParts` rule.
-
-### 7.3 Phase 6 (background): the same rule over a history
-
-With a readings table and stored session instants, the matcher looks for any
-realtime reading inside each draft's window, not just the latest one. The
-decision table stays the same, so Phase 6 reuses `planOdometerFill` over a
-list of readings instead of one.
+This is simpler: fetch the current odometer and telemetry states. It returns
+`{ km, carReportedAt }` for the page to show. Nothing is written until the user
+saves, and the saved row gets `odometer_source = 'car'` only if the submitted
+value still equals the fetched one. Otherwise the user edited it, and it
+counts as `manual`.
 
 ---
 
-## 8. UI
+## 7. UI
 
-### 8.1 `/settings`: new "BYD vehicle" heading
+### 7.1 `/settings`: new "Car odometer (Home Assistant)" heading
 
-Its states mirror the Evnex card's:
+- **Not connected:** HA URL, token, and a **Connect** button. The help text
+  links to HA's token page and recommends the dedicated user (§8).
+- **Connected:** the odometer and telemetry sensor pickers (loaded by a
+  client-side fetch to `src/routes/settings/ha-sensors/+server.ts`, **not** in
+  `load`, for the same reason as `charge-points/+server.ts`: a network
+  dependency mustn't block page render), a **Test read** button, the enabled
+  switch, the last-read status line, and **Disconnect** (clears the token).
+- **Error:** a 401 (token revoked) or an unreachable host. Show the error and
+  let the user fix the URL or paste a new token in place.
 
-- **Signed out:** username, password, region, and a **Sign in** button. A
-  line of help text links to the README's shared-account instructions and
-  says plainly that the password is stored (§9).
-- **Connected:** the account, a vehicle picker (listed through a client-side
-  fetch to `src/routes/settings/byd-vehicles/+server.ts`, **not** in `load`,
-  for the same reason as `charge-points/+server.ts`: an unofficial API mustn't
-  block page render), an **enabled** switch, a **Test read** button showing
-  "118,204 km, reported by the car 14 min ago", the last-read status line,
-  and **Sign out** (clears password, tokens and VIN; keeps the device profile
-  so the account doesn't see a "new phone" if it signs in again).
-- **Auth failed:** the password changed or the account was locked. Show the
-  error and a password field to sign in again. It's the same pattern as the
-  Evnex "refresh token expired" state.
-
-### 8.2 `/sessions`
+### 7.2 `/sessions`
 
 - **Add form:** a small **Read from car** icon button next to the Odometer
-  field, shown only when the integration is enabled. It calls a `+server.ts`
-  endpoint (`src/routes/sessions/car-odometer/+server.ts`) with `fetch`, so
-  the ~15 s realtime round-trip doesn't block a form action. On success it
-  fills the field and shows a hint beneath it: _"From car, reported 3 min
-  ago."_ If the car's timestamp is more than, say, 30 minutes old (the car is
-  asleep and this is its last-known state), the hint changes to a warning:
-  _"Car last reported 2 days ago — check this matches the dash."_ The
-  existing `isOdometerBelowLastRecorded` warning still applies on save.
-- **Pull from charger:** once the Evnex form action returns, the page calls
-  the same endpoint with `?apply=1`. The server runs `planOdometerFill`,
-  writes the `fill` outcomes, and returns the `suggest` ones, which pre-fill
-  the matching drafts' _Add odometer_ inputs with the same "From car" hint.
-  The two stay as separate requests so that a slow or broken BYD API never
-  delays or fails an Evnex import.
+  field, shown only when the integration is enabled. It calls
+  `src/routes/sessions/car-odometer/+server.ts` with `fetch`, fills the field,
+  and shows _"From car, reported 3 min ago."_ If the car's data is more than
+  30 minutes old, the hint becomes a warning: _"Car last reported 2 days ago —
+  check this matches the dash."_ The existing below-last-recorded warning
+  still applies on save.
+- **Pull from charger:** after the Evnex form action returns, the page posts
+  to the same endpoint with `?apply=1`. The server runs `planOdometerFill`
+  over all open imported drafts (those with `started_at`), writes the `fill`s,
+  and returns the `suggest`ions to pre-fill. The two stay as separate
+  requests so that HA being down never delays or fails an Evnex import. The
+  existing "N sessions imported" message gains "…N odometers filled from car".
 - **Draft rows:** each _Add odometer_ field gets its own **Read from car**
-  button, with the same behaviour as in the Add form.
+  button, which uses the history rule (§6.2) for that one draft when it has
+  `started_at`, and the current value (§6.3) otherwise.
 
-### 8.3 Provenance chip
+### 7.3 Provenance icon
 
-A session whose `odometerSource === 'car'` gets a small car icon beside the
-km figure in the history list, with a tooltip. It's an icon rather than
-another coloured chip because the chip slot already carries kind
-(Home / Public / Home - Imported). Screenshot it in both themes (CLAUDE.md
-"Browser testing"); the Evnex chip needed a separate dark-mode colour.
-
----
-
-## 9. Credentials and privacy
-
-Persisting a plaintext password is a step beyond what the Evnex integration
-does, so this section is explicit about it.
-
-- The BYD password, the `signToken`/`encryToken`, and the device profile are
-  never returned by any `load` function or `+server.ts` response, never
-  rendered, and never logged. The client package must redact them from debug
-  output the way pyBYD's `_redact.py` does; ship that rule with the package's
-  first logging statement, not after an incident.
-- **No "encryption at rest" theatre.** The key would have to live next to the
-  database (there's no deployment config to put it in, §2 #7), so it would
-  protect nothing the file permissions don't. This section says so plainly.
-  The real mitigation is §2 #2: the stored password belongs to a secondary
-  account with a limited share, not to the owner's account.
-- The VIN is personal data in the same class as the home address. It stays
-  in the DB and never goes into logs or error messages.
-- No location data is ever requested, so the integration can't leak the car's
-  location. This is enforced by the client package leaving GPS out of scope
-  (§5).
-- CLAUDE.md "Privacy" gets a BYD paragraph (§13).
+A session whose `odometer_source === 'car'` gets a small car icon beside the
+km figure in the history list, with a tooltip ("Odometer read from the car via
+Home Assistant"). It's an icon rather than another coloured chip because the
+chip slot already carries kind (Home / Public / Home - Imported). Screenshot it
+in both themes (CLAUDE.md "Browser testing").
 
 ---
 
-## 10. Testing
+## 8. Credentials, privacy and security
 
-- **`byd-client` package:** golden vectors from pyBYD (§5), zod schema tests
-  against captured responses from the spike (redacted: VIN, plate, userId and
-  tokens replaced), sentinel normalisation (`0`, `-1`, missing, non-km unit),
-  the one-retry-on-`1005` rule, and the sleep guard (no polling after
-  `onlineState: 2`).
-- **`byd.test.ts` (this repo):** the whole §7.2 decision table: a reading
-  exactly on each boundary, one second either side, a still-charging session,
-  a vehicle-list reading (never `fill`), a reading below the last recorded
-  odometer, several drafts where only the latest can be `suggest`, a reading
-  timestamped in the future (clock skew; treat it as `suggest`, never
-  `fill`), and a draft across a DST change, checked against the Evnex
-  `toLocalDateTime` conversions.
-- **Playwright:** the `/settings` card in all three states, the Read from car
-  hint (fresh vs. stale), a pre-filled suggestion on a draft, and the
-  provenance icon, all in light and dark and with the `en-GB` locale recipe
-  from CLAUDE.md. A `BYD_FAKE=1` dev-only stub behind the `+server.ts`
-  endpoints lets this run without a real car. It's dev-only, and **not** a
-  deployment setting.
+- **An HA long-lived token is a powerful credential.** HA has no read-only or
+  scoped tokens. Even a non-admin HA user's token can read every entity and
+  call services, which with `hass-byd-vehicle` installed includes unlocking the
+  car. The token is therefore at least as sensitive as the Evnex refresh token:
+  it's never returned by a `load` function or `+server.ts` response, never
+  rendered (the settings field is write-only and shows "token saved"), and
+  never logged, including in error messages from failed `fetch`es.
+- **Recommend a dedicated non-admin HA user** for the token. It doesn't make
+  the token read-only (see above), but it can be revoked on its own without
+  touching the user's own sessions, and it keeps admin-only APIs out of reach.
+  Say this honestly in the help text; don't imply it makes the token safe.
+- **Transport.** The token goes in a header on every request. Plain `http://`
+  is acceptable on the LAN, since that's where the Docker/Unraid deployment and
+  HA both live. If HA uses a self-signed certificate, Node's `fetch` will
+  refuse it. Report that as a clear connection error, and never add a "skip
+  TLS verification" switch.
+- **What's requested:** only the two configured entities, plus the one-time
+  `GET /api/states` for the picker, which does see every entity. The picker
+  response is filtered server-side to candidate sensors before it reaches the
+  browser, so the house's other entities are never sent to the page.
+- **Electron away from home.** The desktop build only reaches HA when HA is
+  reachable (home network, or the user's own remote URL). If it isn't, the
+  **Read from car** button shows a connection error and everything else works
+  as normal. No offline queueing: the reading can be fetched later, from the
+  history, as long as it's within recorder retention.
 
 ---
 
-## 11. Phasing
+## 9. Testing
+
+- **`car-odometer.test.ts`** covers the whole §6.2 table: a telemetry value
+  exactly on each window boundary and one second either side; telemetry
+  `last_changed` inside the window but its _value_ outside it (stale re-poll,
+  which must not `fill`); the odometer changing inside the window (must not
+  `fill`); `unavailable`/`unknown`/`0`/`-1` states; a non-km unit; an empty
+  history (outside retention); no telemetry entity configured (never `fill`);
+  a value below the previous session's odometer; a still-charging window; and
+  a window spanning a DST change (instants only, never local strings).
+- **`home-assistant.ts`** stays thin enough that it isn't unit tested (the same
+  policy as `evnex-client.ts`), but its history parser, which turns
+  `minimal_response` arrays into `StateChange[]`, lives in `car-odometer.ts`
+  and is tested against a captured, redacted response from the user's HA.
+- **`evnex.test.ts`** adds `planImport` cases for the new
+  `startedAt`/`endedAt` pass-through and the backfill-on-existing-draft
+  path.
+- **Playwright** covers the settings card in all three states, the Read from
+  car hint (fresh vs. stale), a pre-filled suggestion on a draft, and the
+  provenance icon, in light and dark and with CLAUDE.md's `en-GB` locale
+  recipe. A dev-only `HA_FAKE=1` stub behind the two `+server.ts` endpoints
+  lets this run without a real HA. It's dev-only, and **not** a deployment
+  setting.
+
+---
+
+## 10. Phasing
 
 Each phase lands green (`npm run check`, `npm run lint`, `npm run test`).
 
-| #   | Phase                                                                                                           | Notes                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
-| --- | --------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| 0   | **Spike, using pyBYD itself, against the real car**                                                             | No TypeScript. `pip install pybyd`, then use a dedicated shared account to log in, list vehicles, read realtime repeatedly over several days, and capture redacted fixtures. It answers: the realtime-vs-vehicle-list freshness question (§4.4); whether a trigger wakes a sleeping car; the `time` field's format; the server-side session lifetime (§4.3); whether a narrow share still exposes the odometer (§4.8); and whether signing in logs the phone app out. **Go/no-go:** if the odometer can't be read reliably from a shared account, stop here. That costs nothing, whereas finding out in Phase 2 wastes a port. |
-| 1   | `byd.ts` pure logic + full Vitest suite                                                                         | No network, no UI. It can run in parallel with Phase 2, using the Phase 0 fixtures.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
-| 2   | `byd-client` package: crypto, login, vehicle list, realtime                                                     | The largest and riskiest phase. Golden vectors come first, then one live login. Also confirm the tables file survives bundling for Docker and Electron (§5).                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
-| 3   | Schema (`byd_integration`, `odometer_source`) + `byd-auth.ts`/`byd-client.ts`/`byd-token.ts` + `/settings` card | First real use from inside the app. Ends with a working Test read.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
-| 4   | **Read from car** in the Add form and on draft rows                                                             | The first payoff, and useful even without Evnex (public sessions).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
-| 5   | Auto-fill after **Pull from charger** + provenance icon                                                         | The main payoff: a home session goes from charger to complete with no typing.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
-| 6   | _Optional_, background sampler + readings table + session instants                                              | Only if Phase 0 shows a no-wake read path and Phases 4–5 leave you wanting more (§12 #3).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
-| 7   | Playwright verification + §13 documentation                                                                     |                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| #   | Phase                                                                                                            | Notes                                                                                                                                                                                                                                                                                    |
+| --- | ---------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 0   | **Capture fixtures from the real HA** (about 15 minutes, no code)                                                | `curl` the two entity states and one history window covering a recent overnight charge, then redact VIN and friendly names. This confirms the entity IDs, the telemetry value format, and that a charge window contains at least one fresh telemetry report at the user's poll interval. |
+| 1   | Schema: `home_assistant_integration`, `odometer_source`, `started_at`/`ended_at` + the `planImport` pass-through | Migration only, plus the Evnex import populating the instants from then on.                                                                                                                                                                                                              |
+| 2   | `car-odometer.ts` pure logic + full Vitest suite                                                                 | No network, no UI. Built against the Phase 0 fixtures.                                                                                                                                                                                                                                   |
+| 3   | `home-assistant.ts` + `/settings` card + sensor picker + Test read                                               | First real HA contact.                                                                                                                                                                                                                                                                   |
+| 4   | **Read from car** in the Add form and on draft rows                                                              | The first payoff, and useful for public sessions even without Evnex.                                                                                                                                                                                                                     |
+| 5   | Auto-fill after **Pull from charger** + provenance icon                                                          | The main payoff: a home session goes from charger to complete with no typing.                                                                                                                                                                                                            |
+| 6   | Playwright verification + §12 documentation                                                                      |                                                                                                                                                                                                                                                                                          |
+
+This is materially smaller than the direct-BYD plan (Appendix A). There's no
+crypto port, no separate package, no stored BYD password, and no background
+scheduler.
 
 ---
 
-## 12. Open decisions
+## 11. Open decisions
 
-| #   | Question                                                                                                                                                                                                                                                                                                                                                                                       | Default if unanswered                                                                                                                                                                                                   |
-| --- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 1   | **Persist the BYD password, or ask again whenever the session lapses?** Persisting it makes the integration work unattended. Asking again keeps the Evnex rule ("password used once, never stored"), but if the server-side lifetime really is ~12 h (§4.3), that means typing it almost every time you use the button.                                                                        | **Persist it**, on a dedicated shared account (§2 #2, §9). Revisit if Phase 0 measures sessions lasting weeks. At that point the Evnex-style reconnect prompt becomes tolerable and the stored password can be dropped. |
-| 2   | **Use a dedicated shared BYD account?** Signing the app in with your main account would log out your phone's BYD app, and that would happen on every re-login.                                                                                                                                                                                                                                 | **Yes, and require it:** the `/settings` help text tells you to, and the README walks through the share.                                                                                                                |
-| 3   | **Add background sampling (Phase 6) so drafts fill with no interaction at all?** In the typical flow (plug in in the evening, tap Pull the next morning before driving), the car's last-known state is still from while it was parked on the charger, so Phase 5 already fills most home sessions _exactly_ with a single tap. Background sampling mainly helps when you drive before pulling. | **No**, until Phases 4–5 have been in use for a billing period. It adds a scheduler to an app that has none (Electron and Docker would each need one), plus battery drain and a readings table.                         |
-| 4   | **Fill `settings.vehicleLabel` from the car's plate/VIN?**                                                                                                                                                                                                                                                                                                                                     | **No.** Show the car's plate beside the vehicle picker so you can confirm you've picked the right car, but never write to report-identity settings automatically.                                                       |
-| 5   | **Support more than one region?**                                                                                                                                                                                                                                                                                                                                                              | **AU only in the UI**, with `region` stored as an enum so adding more is a one-line change. The HA integration's region table is the reference when that happens.                                                       |
+| #   | Question                                                                                                | Default if unanswered                                                                                          |
+| --- | ------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------- |
+| 1   | **Go through Home Assistant rather than BYD directly?**                                                 | **Yes** (§2 #1). Revisit only if HA stops being part of the setup; Appendix A has the groundwork for that.     |
+| 2   | **Auto-fill after every Pull from charger, or only when a separate "Fill odometers" button is tapped?** | **Automatically.** A `fill` is proven exact (§6.2), and a second button would be a step that's always pressed. |
+| 3   | **Fill `settings.vehicleLabel` from HA's car name or VIN?**                                             | **No.** Never write report-identity settings automatically.                                                    |
+| 4   | **How stale can "Read from car" be before it warns?**                                                   | **30 minutes**, as a constant in `car-odometer.ts`. Tune it after a billing period of use.                     |
 
 ---
 
-## 13. Documentation to update
+## 12. Documentation to update
 
 Owed once this lands:
 
-- **CLAUDE.md, "Key domain logic":** a BYD bullet covering the exact-vs-suggestion
-  rule (§7.2), that `chargeState` is deliberately ignored, that `0`/`-1`
-  odometers are sentinels (the opposite of Evnex's kWh `0`), and that the API
-  is unofficial and obfuscated (§4.0).
-- **CLAUDE.md, layering convention:** `byd.ts` / `byd-auth.ts` /
-  `byd-client.ts` / `byd-token.ts`, plus the two new `+server.ts` exceptions
-  (`settings/byd-vehicles`, `sessions/car-odometer`) and why they exist.
-- **CLAUDE.md, "Stack specifics":** `byd-client` (a narrow port of pyBYD), the
-  bundled Bangcle tables, and a "do not" note: don't add MQTT or command
-  endpoints to "complete" the port. They're out of scope on purpose (§2 #1).
-- **CLAUDE.md, "Privacy":** the DB now holds a plaintext BYD password and BYD
-  session tokens, and the VIN. It's the same "never log, render, or return"
-  rule as the Evnex refresh token, but stronger, because this one is the
-  actual password.
-- **README.md:** a "BYD vehicle integration" section: how to create and share
-  a dedicated account, that it's configured only in `/settings`, that the
-  password is stored, and that it uses an unofficial API that can break
-  without notice.
-- **No deployment-config changes:** `.env.example`, the `Dockerfile` and the
-  Unraid template are untouched, as with Evnex. The only packaging check is
-  the tables file (§5).
+- **CLAUDE.md, "Key domain logic":** a car-odometer bullet covering the §6.2
+  rule (telemetry _value_ inside the charge window, not HA's `last_changed`),
+  that charging-state sensors are deliberately ignored, the `km`-only unit
+  rule, and the recorder-retention limit.
+- **CLAUDE.md, layering convention:** `car-odometer.ts` (pure) and
+  `home-assistant.ts` (impure), plus the two new `+server.ts` exceptions
+  (`settings/ha-sensors`, `sessions/car-odometer`) and why they exist.
+- **CLAUDE.md, "Privacy":** the DB now holds an HA long-lived token, which can
+  control the house and car, not just read the odometer. The same "never log,
+  render, or return" rule as the Evnex refresh token, stated more strongly.
+- **README.md:** a "Car odometer via Home Assistant" section: requires
+  `hass-byd-vehicle` (or any HA odometer sensor in km), how to create the
+  dedicated user and token, and that it's configured only in `/settings`.
+- **No deployment-config changes.** `.env.example`, the `Dockerfile` and the
+  Unraid template are untouched.
+
+---
+
+## Appendix A: the direct BYD API route (not taken)
+
+This is recorded so the research isn't lost if Home Assistant ever leaves the
+setup. The sources are [`jkaberg/pyBYD`](https://github.com/jkaberg/pyBYD)
+(MIT; the library `hass-byd-vehicle` pins as `pybyd==0.0.75`) and
+[`TA2k/ioBroker.byd`](https://github.com/TA2k/ioBroker.byd) (MIT, JavaScript),
+both building on `Niek/BYD-re`.
+
+- **Region:** the AU API base is `https://dilinkappoversea-au.byd.auto`, with
+  country code `AU`.
+- **Wire format:** four layers. There's AES-128-CBC with a zero IV on the
+  inner JSON (the key is `MD5(MD5(password))` at login and `MD5(encryToken)`
+  after), a nonstandard "mixed-case" SHA-1 signature over sorted fields, and
+  an MD5 "checkcode" over the exact outer JSON serialization, so key order
+  matters. The outer layer is a **"Bangcle" envelope**: white-box AES using
+  about 830 KB of lookup tables extracted from BYD's Android native library.
+  If BYD rotates those tables, every client breaks. ioBroker's
+  `lib/bangcle.js` is a working JS implementation to port from.
+- **Login** (`/app/account/login`) sends the **plaintext password** (as
+  `signKey`, inside the envelope) and returns `{userId, signToken,
+encryToken}`. **There's no refresh token.** Session-expired codes
+  `1002`/`1005`/`1010` mean logging in again with the password, so the
+  password would have to be stored.
+- **One live session per account.** Signing in logs out other clients on the
+  same account (the HA README warns about this). This app would therefore
+  need its own shared BYD account, separate from both the phone app's and
+  HA's.
+- **Odometer:** `totalMileage` (km) is on both the vehicle list
+  (`/app/account/getAllListByUserId`, one call, freshness unknown) and the
+  realtime trigger/poll pair
+  (`/vehicleInfo/vehicle/vehicleRealTimeRequest` → `…RealTimeResult`, up to
+  about 15 s, with a `time` field for the car's timestamp). `0` and `-1` are
+  "no data" placeholders.
+- **Other obligations:** a persisted fake Android device profile (HA
+  generates one per account from a device pool), an `appVersion` string that
+  upstream bumps as BYD updates its app, and battery drain if the car is
+  polled while asleep (HA measured about 0.1 kWh/h at a 300 s interval).
+- **Estimated shape:** a separate `byd-client` npm package (a narrow pyBYD
+  port with golden test vectors generated from pyBYD), a stored BYD password,
+  and eventually a background sampler to get readings during charges. That's
+  several times the work of this plan, for the same number.
