@@ -243,6 +243,7 @@ export const carOdometerIntegration = sqliteTable('car_odometer_integration', {
 	secret: text('secret'), // companion secret; scoped to reading odometer history (§8)
 	enabled: integer('enabled', { mode: 'boolean' }).notNull().default(false),
 	lastReadAt: text('last_read_at'),
+	lastSuccessAt: text('last_success_at'), // drives the 3-day escalation, §7.3
 	lastReadStatus: text('last_read_status', {
 		enum: ['ok', 'auth_failed', 'unreachable', 'companion_missing', 'companion_outdated', 'no_data']
 	}),
@@ -258,7 +259,7 @@ exactly the windows it needs.
 1. **`odometer_source`**: `text('odometer_source', { enum: ['manual', 'car'] })`,
    nullable, with existing rows staying `NULL` (which reads as manual). It
    answers "where did this odometer figure come from?" for the lease company,
-   and the history list's provenance icon (§7.3) reads it. This is the
+   and the history list's provenance icon (§7.4) reads it. This is the
    "source column" the Evnex plan deferred until a second integration
    appeared (EVNEX-INTEGRATION-PLAN.md §12 #2), scoped to the one field it
    concerns.
@@ -342,10 +343,12 @@ gets just the current state.
   configured; a `version` mismatch means "update the companion"; a timeout
   means HA is unreachable. A certificate error shows up as a connection
   error: there's no "skip TLS verification" switch.
-- **After a `401`, automatic calls stop.** `lastReadStatus = 'auth_failed'`
-  stops Pull from charger from calling the companion until **Test** succeeds
-  again. Rotating the secret in only one of the two places shouldn't turn
-  every pull into a failed request.
+- **After a `401`, automatic calls stop, and the app says so loudly.**
+  `lastReadStatus = 'auth_failed'` stops Pull from charger from calling the
+  companion until **Test** succeeds again. That way, changing the secret in
+  only one of the two places doesn't turn every pull into a failed request.
+  Stopping must never be silent, though. §7.3 covers how it's shown
+  everywhere the feature is used.
 
 **Test** calls `src/routes/settings/car-odometer/+server.ts` with `fetch`
 rather than running in `load`, for the same reason as `charge-points/+server.ts`:
@@ -374,7 +377,64 @@ a network dependency mustn't block page render.
   rule for that one draft when the draft has `started_at`, and reads the
   current value otherwise.
 
-### 7.3 Provenance icon
+### 7.3 A broken integration must be obvious
+
+When odometers stop filling, the user notices by _not_ noticing: drafts just
+quietly go back to needing typed odometers. So a broken setup gets surfaced
+wherever the feature would have acted, not only on `/settings`.
+
+Two kinds of failure, treated differently:
+
+| Kind                                                              | Statuses                                                         | Why                                                                                    |
+| ----------------------------------------------------------------- | ---------------------------------------------------------------- | -------------------------------------------------------------------------------------- |
+| **Broken:** needs the user to fix something, and won't fix itself | `auth_failed`, `companion_missing` (`404`), `companion_outdated` | Retrying can't help, and calls are paused (§7.1).                                      |
+| **Transient:** likely to fix itself                               | `unreachable`, timeouts, `5xx`                                   | HA restarting, no internet, or the relay briefly down. The next call may well succeed. |
+
+**Broken**, while the integration is enabled:
+
+- **A persistent warning banner on `/sessions`**, above the history list,
+  using the same error colour as the rest of the app in both themes. It
+  reads: _"Car odometer paused — Home Assistant rejected the secret. Odometers
+  won't fill from the car until it's fixed."_ It has a **Fix in Settings**
+  button, and a message specific to each status (not installed: "The Home
+  Assistant companion isn't installed or set up"; outdated: "Update the Home
+  Assistant companion"). It can't be dismissed. It goes away only when the
+  status stops being broken: after a successful **Test**, or when the
+  integration is switched off.
+- **The Pull from charger result** carries the same message instead of "…N
+  odometers filled from car". So a pull that imports sessions but skips
+  odometers says why, in the place the user is looking.
+- **The Read from car buttons** stay visible but show an error state (a
+  warning icon instead of the car icon, with the reason as a tooltip). Tapping
+  one opens the same message with the **Fix in Settings** link. It doesn't make
+  a request, because the button existing is itself how the user notices.
+- **A warning dot on the Settings item in the navigation**, since `/settings`
+  is where the fix happens and the rest of the app has to point there.
+- **In `/settings`,** the card opens in its error state, with the reason in
+  plain words, the time of the last successful read, and **Test** as the
+  primary action.
+
+**Transient:** reported where it happened, without a banner.
+
+- The Pull result says "Home Assistant unreachable — odometers not filled",
+  and Read from car shows the same message inline.
+- **It escalates to a banner if it doesn't clear.** If there hasn't been a
+  successful read for 3 days while calls kept failing, the `/sessions` banner
+  appears with _"Can't reach Home Assistant since Tue 23 Sep"_. Three days
+  matches the Evnex lookback: past that point, charges start slipping out of
+  what the next pull could still fill. This requires `lastSuccessAt` alongside
+  `lastReadAt` in `car_odometer_integration` (§5).
+
+All of this is driven by `load` data (the integration row's status), never by
+a network call on page load. The banner shows whether or not HA is up right
+now, and costs nothing to render.
+
+The banner, nav dot and error-state button are built generically: a
+`status`, a message and a link. The Evnex integration can then show its
+existing `auth_failed` state the same way. Today Evnex only shows that on
+`/settings`, so it has the same "silently stops" gap (§11 #5).
+
+### 7.4 Provenance icon
 
 A session whose `odometer_source === 'car'` gets a small car icon beside the
 km figure in the history list, with a tooltip ("Odometer reported by the car
@@ -426,7 +486,9 @@ the chip slot already carries kind. Screenshot it in both themes (CLAUDE.md
   pass-through and the backfill-on-existing-draft path.
 - **Playwright:** the settings card in all states, the Read from car hint
   (fresh vs. stale), a pre-filled suggestion on a draft, the unreachable
-  message, and the provenance icon, in light and dark and with CLAUDE.md's
+  message, every §7.3 broken state (the banner, the nav dot, the error-state
+  buttons, and the banner clearing after a successful Test), the 3-day
+  escalation, and the provenance icon, in light and dark and with CLAUDE.md's
   `en-GB` locale recipe. A dev-only `CAR_ODOMETER_FAKE=1` stub behind the two
   `+server.ts` endpoints serves a fixture response. It's dev-only, and **not**
   a deployment setting.
@@ -452,12 +514,13 @@ Each app phase lands green (`npm run check`, `npm run lint`, `npm run test`).
 
 ## 11. Open decisions
 
-| #   | Question                                                                                | Default if unanswered                                                                                          |
-| --- | --------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------- |
-| 1   | **Auto-fill after every Pull from charger, or only behind a separate button?**          | **Automatically.** A `fill` is proven exact (§6.2), and a second button would be a step that's always pressed. |
-| 2   | **How stale can "Read from car" be before it warns?**                                   | **30 minutes**, as a constant. Tune it after a billing period of use.                                          |
-| 3   | **Publish the companion to the default HACS store, or keep it as a custom repository?** | **Custom repository.** It's built for this app. Publishing brings review requirements and users to support.    |
-| 4   | **Fill `settings.vehicleLabel` from the car?**                                          | **No.** Never write report-identity settings automatically, and the endpoint doesn't return the VIN anyway.    |
+| #   | Question                                                                                             | Default if unanswered                                                                                                                                          |
+| --- | ---------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1   | **Auto-fill after every Pull from charger, or only behind a separate button?**                       | **Automatically.** A `fill` is proven exact (§6.2), and a second button would be a step that's always pressed.                                                 |
+| 2   | **How stale can "Read from car" be before it warns?**                                                | **30 minutes**, as a constant. Tune it after a billing period of use.                                                                                          |
+| 3   | **Publish the companion to the default HACS store, or keep it as a custom repository?**              | **Custom repository.** It's built for this app. Publishing brings review requirements and users to support.                                                    |
+| 4   | **Fill `settings.vehicleLabel` from the car?**                                                       | **No.** Never write report-identity settings automatically, and the endpoint doesn't return the VIN anyway.                                                    |
+| 5   | **Should the Evnex integration's `auth_failed` get the same `/sessions` banner and nav dot (§7.3)?** | **Yes, as a small follow-up** once the shared banner component exists. It's the same "silently stops" gap, and the Evnex refresh token will expire eventually. |
 
 ---
 
