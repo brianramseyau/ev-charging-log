@@ -971,34 +971,6 @@
 			color: #2dd4bf;
 		}
 
-		.complete-form__odometer {
-			display: flex;
-			align-items: center;
-			gap: 0.25rem;
-		}
-
-		.complete-form__odometer input {
-			flex: 1;
-			min-width: 0;
-		}
-
-		.odometer-field {
-			display: flex;
-			align-items: center;
-			gap: 0.25rem;
-		}
-
-		.odometer {
-			display: inline-flex;
-			align-items: center;
-			gap: 0.25rem;
-		}
-
-		.odometer-source {
-			display: inline-flex;
-			color: #0f766e;
-		}
-
 		.complete-form__field input {
 			background: #1e293b;
 			border-color: rgba(255, 255, 255, 0.2);
