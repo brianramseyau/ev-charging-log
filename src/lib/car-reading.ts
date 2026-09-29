@@ -84,6 +84,8 @@ export type CarFillResult =
 	| {
 			ok: true;
 			filled: number;
+			/** Ids of the rows actually written — see the sessions page's auto-completed wording. */
+			filledIds: number[];
 			suggestions: { id: number; km: number; carReportedAt: string }[];
 			skipped: number;
 	  }

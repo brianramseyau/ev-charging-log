@@ -24,8 +24,10 @@
 		hintFor,
 		isBrokenStatusName,
 		type CarHint,
+		type CarFillResult,
 		type CarReadResult
 	} from '$lib/car-reading';
+	import { composePollFeedback, type PollFeedbackLine, type PollSummary } from '$lib/poll-feedback';
 	import DateTimeField from '$lib/components/DateTimeField.svelte';
 	import Icon from '$lib/components/Icon.svelte';
 	import type { ActionData, PageData } from './$types';
@@ -122,10 +124,15 @@
 
 	// The auto-fill that runs straight after Pull from charger: a separate request,
 	// so Home Assistant being slow or down never delays or fails the Evnex import.
+	// Its answer is composed with the import summary — a just-imported charge the
+	// car proved the odometer for is worded "auto-completed", not "draft". The
+	// running flag is raised by the enhance callback before the result applies,
+	// so only the "Reading odometers…" note shows until the composed lines land.
 	let carFillRunning = $state(false);
+	let pollLines = $state<PollFeedbackLine[] | null>(null);
 	let carFill = $state<CarHint | null>(null);
 
-	async function runCarFill() {
+	async function runCarFill(summary: PollSummary) {
 		carFillRunning = true;
 		const result = await applyCarOdometer();
 		carFillRunning = false;
@@ -139,48 +146,31 @@
 					text: 'From car — not confirmed during this charge.'
 				};
 			}
-			const parts: string[] = [];
-			if (result.filled > 0) {
-				parts.push(`${result.filled} odometer${result.filled === 1 ? '' : 's'} filled from car`);
-			}
-			if (result.suggestions.length > 0) {
-				parts.push(
-					`${result.suggestions.length} suggested from car — check ${result.suggestions.length === 1 ? 'it' : 'them'} and tap Complete`
-				);
-			}
-			if (parts.length === 0 && result.skipped > 0) {
-				parts.push("the car couldn't confirm any odometers — add them by hand");
-			}
-			carFill =
-				parts.length > 0
-					? { tone: 'ok', text: `${parts.join('; ').replace(/^\w/, (c) => c.toUpperCase())}.` }
-					: null;
-		} else if (result.status === 'disabled') {
-			carFill = null;
-		} else if (result.broken || isBrokenStatusName(result.status)) {
-			carFill = { tone: 'error', text: `Odometers not filled: ${result.message}`, fix: true };
-		} else {
-			carFill = { tone: 'warning', text: 'Home Assistant unreachable — odometers not filled.' };
 		}
+		pollLines = composePollFeedback(summary, result.ok ? result : null);
+		carFill = carFillHint(result);
 		await invalidateAll();
 	}
 
-	const pollSummary = $derived(form?.pollSummary ?? null);
-	const pollError = $derived(form?.pollError ?? null);
-
-	function formatPollSummary(summary: NonNullable<typeof pollSummary>) {
-		const parts: string[] = [];
-		if (summary.stillCharging > 0) {
-			parts.push(
-				`${summary.stillCharging} session${summary.stillCharging === 1 ? ' is' : 's are'} still charging — not eligible to import yet`
-			);
-		}
-		parts.push(`imported ${summary.inserted} draft${summary.inserted === 1 ? '' : 's'}`);
-		parts.push(`updated ${summary.updated}`);
-		if (summary.skipped > 0) parts.push(`skipped ${summary.skipped} already imported`);
-		const sentence = parts.join(', ');
-		return `${sentence.charAt(0).toUpperCase()}${sentence.slice(1)}.`;
+	/** Failure wording for the car fill, below the poll summary. A success is
+	 *  entirely in composePollFeedback's lines, so nothing extra shows here. */
+	function carFillHint(result: CarFillResult): CarHint | null {
+		if (result.ok || result.status === 'disabled') return null;
+		if (result.broken || isBrokenStatusName(result.status))
+			return { tone: 'error', text: `Odometers not filled: ${result.message}`, fix: true };
+		return { tone: 'warning', text: 'Home Assistant unreachable — odometers not filled.' };
 	}
+
+	// No-JS fallback: without enhance there's no client to compose the car-fill
+	// answer with, so the server summary renders as-is (drafts worded plainly).
+	// Suppressed while the post-poll car fill runs — that window shows only the
+	// "Reading odometers…" note, so "N drafts" never flashes before the composed
+	// wording (auto-completed vs draft) replaces it.
+	const fallbackLines = $derived(
+		form?.pollSummary && !carFillRunning ? composePollFeedback(form.pollSummary, null) : null
+	);
+
+	const pollError = $derived(form?.pollError ?? null);
 
 	const PAGE_SIZE = 5;
 	let visibleCount = $state(PAGE_SIZE);
@@ -260,10 +250,31 @@
 		use:enhance={() => {
 			polling = true;
 			carFill = null;
+			pollLines = null;
+			// Raised before the action result applies: the moment `form.pollSummary`
+			// lands it would otherwise render as "N drafts" (the fallback) during the
+			// microtask before runCarFill raises the flag itself.
+			if (data.carOdometerEnabled) carFillRunning = true;
 			return async ({ result, update }) => {
 				polling = false;
-				await update();
-				if (result.type === 'success' && data.carOdometerEnabled) await runCarFill();
+				try {
+					await update();
+					const summary =
+						result.type === 'success'
+							? (result.data?.pollSummary as PollSummary | undefined)
+							: undefined;
+					if (summary && data.carOdometerEnabled) {
+						await runCarFill(summary);
+					} else if (summary) {
+						// No car integration (or a failed poll): the summary speaks for itself.
+						pollLines = composePollFeedback(summary, null);
+					}
+				} finally {
+					// update()'s default flow awaits invalidation, which can reject (a
+					// failing load re-run, say) — that must not leave the fill-running
+					// flag up with "Reading odometers…" showing and the summary hidden.
+					carFillRunning = false;
+				}
 			};
 		}}
 	>
@@ -283,25 +294,18 @@
 		<a href={resolve('/settings')}>Set up the Evnex integration</a> to pull sessions automatically.
 	</p>
 {/if}
-{#if pollSummary}
-	<p class="save-feedback__ok">{formatPollSummary(pollSummary)}</p>
-	{#if pollSummary.tombstoned > 0}
-		<p class="save-feedback__note">
-			{pollSummary.tombstoned} invalid or zero-energy session{pollSummary.tombstoned === 1
-				? ''
-				: 's'} dismissed.
+{#if pollLines ?? fallbackLines}
+	{#each pollLines ?? fallbackLines as line (line.text)}
+		<p
+			class={line.tone === 'ok'
+				? 'save-feedback__ok'
+				: line.tone === 'warning'
+					? 'save-feedback__warning'
+					: 'save-feedback__note'}
+		>
+			{line.text}
 		</p>
-	{/if}
-	{#if pollSummary.invalidAfterImport.length > 0}
-		<p class="save-feedback__warning">
-			{pollSummary.invalidAfterImport.length} previously imported session{pollSummary
-				.invalidAfterImport.length === 1
-				? ''
-				: 's'} marked invalid or zero-energy by the charger — review: {pollSummary.invalidAfterImport.join(
-				', '
-			)}.
-		</p>
-	{/if}
+	{/each}
 {/if}
 {#if pollError}
 	<p class="field-error">{pollError}</p>

@@ -19,7 +19,7 @@ import {
 	withEfficiency
 } from '$lib/server/sessions';
 import { calculateSessionCost, resolveRatePlan } from '$lib/server/rates';
-import { importWindow, planImport, type DraftFromEvnex } from '$lib/server/evnex';
+import { importWindow, planImport, type DraftFromEvnex, type SkipReason } from '$lib/server/evnex';
 import { EvnexNetworkError, EvnexRefreshExpiredError } from '$lib/server/evnex-auth';
 import {
 	EvnexApiError,
@@ -446,9 +446,22 @@ export const actions: Actions = {
 			insertsToApply.push({ ...draft, billingPeriodId });
 		}
 
-		const stillChargingSkips = planResult.skipped.filter(
-			(s) => s.reason === 'still_charging'
-		).length;
+		// still_charging is its own summary line ("N sessions are still charging —
+		// not eligible to import yet"), so don't also fold it into "skipped N
+		// already imported" — that label would be wrong for a session that was
+		// never imported at all.
+		const countSkips = (reason: SkipReason) =>
+			planResult.skipped.filter((s) => s.reason === reason).length;
+
+		// The Evnex endpoint takes no date range (plan §4.4), so every poll re-sees
+		// the charger's full history, and the pile of sessions older than the
+		// lookback window only ever grows. Those `outside_window` skips were never
+		// imported and never will be — keep them out of the "skipped N already
+		// imported" count shown to the user.
+		const inWindowSkips =
+			planResult.skipped.length -
+			planResult.skipped.filter((s) => s.reason === 'outside_window').length -
+			countSkips('still_charging');
 
 		const invalidAfterImportSessions = planResult.skipped
 			.filter((s) => s.reason === 'invalid_after_import' || s.reason === 'zero_energy_after_import')
@@ -470,6 +483,7 @@ export const actions: Actions = {
 			}
 		}
 
+		const insertedIds: number[] = [];
 		db.transaction((tx) => {
 			for (const externalId of planResult.tombstone) {
 				tx.insert(evnexDismissedSessions)
@@ -493,7 +507,8 @@ export const actions: Actions = {
 						);
 					}
 				}
-				tx.insert(chargingSessions)
+				const row = tx
+					.insert(chargingSessions)
 					.values({
 						billingPeriodId: draft.billingPeriodId,
 						kind: draft.kind,
@@ -508,7 +523,9 @@ export const actions: Actions = {
 						startedAt: draft.startedAt,
 						endedAt: draft.endedAt
 					})
-					.run();
+					.returning({ id: chargingSessions.id })
+					.get();
+				insertedIds.push(row.id);
 			}
 
 			for (const { id, startedAt, endedAt } of planResult.backfill) {
@@ -542,12 +559,12 @@ export const actions: Actions = {
 
 		return {
 			pollSummary: {
-				inserted: insertsToApply.length,
 				updated: planResult.update.length,
 				tombstoned: planResult.tombstone.length,
-				skipped: planResult.skipped.length + periodSubmittedInsertSkips,
-				stillCharging: stillChargingSkips,
-				invalidAfterImport: invalidAfterImportSessions
+				skipped: inWindowSkips + periodSubmittedInsertSkips,
+				stillCharging: countSkips('still_charging'),
+				invalidAfterImport: invalidAfterImportSessions,
+				insertedIds
 			}
 		};
 	}
