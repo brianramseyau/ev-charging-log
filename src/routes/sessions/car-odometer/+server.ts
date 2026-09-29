@@ -191,13 +191,19 @@ async function applyToDrafts(row: Ready) {
 		now
 	);
 
+	// Only ids the guarded UPDATE actually wrote: the user can save an odometer
+	// while Home Assistant is answering, and that row's `isNull` guard skips it —
+	// reporting it as car-filled would claim a fill that didn't happen.
+	const filledIds: number[] = [];
 	db.transaction((tx) => {
 		for (const { id, km } of plan.fill) {
-			tx.update(chargingSessions)
+			const res = tx
+				.update(chargingSessions)
 				.set({ odometerKm: km, odometerSource: 'car' })
 				// Never over a value the user entered while HA was answering.
 				.where(and(eq(chargingSessions.id, id), isNull(chargingSessions.odometerKm)))
 				.run();
+			if (res.changes > 0) filledIds.push(id);
 		}
 	});
 
@@ -206,8 +212,8 @@ async function applyToDrafts(row: Ready) {
 	// fill as an auto-completed charge rather than a draft + a fill.
 	return json({
 		ok: true,
-		filled: plan.fill.length,
-		filledIds: plan.fill.map((f) => f.id),
+		filled: filledIds.length,
+		filledIds,
 		suggestions: plan.suggest,
 		skipped: plan.skip.length
 	});

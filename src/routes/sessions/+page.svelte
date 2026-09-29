@@ -125,9 +125,9 @@
 	// The auto-fill that runs straight after Pull from charger: a separate request,
 	// so Home Assistant being slow or down never delays or fails the Evnex import.
 	// Its answer is composed with the import summary — a just-imported charge the
-	// car proved the odometer for is worded "auto-completed", not "draft" — and
-	// while it's in flight only the "Reading odometers…" note shows, so the
-	// message never flashes "draft" before upgrading itself.
+	// car proved the odometer for is worded "auto-completed", not "draft". The
+	// running flag is raised by the enhance callback before the result applies,
+	// so only the "Reading odometers…" note shows until the composed lines land.
 	let carFillRunning = $state(false);
 	let pollLines = $state<PollFeedbackLine[] | null>(null);
 	let carFill = $state<CarHint | null>(null);
@@ -163,8 +163,11 @@
 
 	// No-JS fallback: without enhance there's no client to compose the car-fill
 	// answer with, so the server summary renders as-is (drafts worded plainly).
+	// Suppressed while the post-poll car fill runs — that window shows only the
+	// "Reading odometers…" note, so "N drafts" never flashes before the composed
+	// wording (auto-completed vs draft) replaces it.
 	const fallbackLines = $derived(
-		form?.pollSummary ? composePollFeedback(form.pollSummary, null) : null
+		form?.pollSummary && !carFillRunning ? composePollFeedback(form.pollSummary, null) : null
 	);
 
 	const pollError = $derived(form?.pollError ?? null);
@@ -248,6 +251,10 @@
 			polling = true;
 			carFill = null;
 			pollLines = null;
+			// Raised before the action result applies: the moment `form.pollSummary`
+			// lands it would otherwise render as "N drafts" (the fallback) during the
+			// microtask before runCarFill raises the flag itself.
+			if (data.carOdometerEnabled) carFillRunning = true;
 			return async ({ result, update }) => {
 				polling = false;
 				await update();
@@ -257,9 +264,10 @@
 						: undefined;
 				if (summary && data.carOdometerEnabled) {
 					await runCarFill(summary);
-				} else if (summary) {
-					// No car integration: the summary speaks for itself.
-					pollLines = composePollFeedback(summary, null);
+				} else {
+					// No car integration (or a failed poll): the summary speaks for itself.
+					carFillRunning = false;
+					if (summary) pollLines = composePollFeedback(summary, null);
 				}
 			};
 		}}
