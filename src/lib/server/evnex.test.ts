@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
 	importWindow,
 	planImport,
+	summarizePoll,
 	toDraftSession,
 	type EvnexSessionPayload,
 	type ExistingSessionForImport
@@ -418,5 +419,104 @@ describe('planImport: startedAt/endedAt (BYD-INTEGRATION-PLAN.md §5)', () => {
 			baseOpts
 		);
 		expect(result.backfill).toEqual([]);
+	});
+});
+
+describe('summarizePoll', () => {
+	const existing = [
+		{
+			id: 7,
+			externalId: 'evnex-session-1',
+			date: '2026-09-20',
+			time: '18:18'
+		}
+	];
+
+	it('counts only already-imported (and unmappable) sessions as skipped', () => {
+		const plan = planImport(
+			[
+				payload({ id: 'imported', energyKwh: 42 }), // already_complete
+				payload({ id: 'unmappable', startDate: null }), // unmappable
+				payload({ id: 'blip', energyKwh: 0 }), // zero_energy (tombstoned, own line)
+				payload({ id: 'old', startDate: '2026-07-01T00:00:00.000Z' }), // outside_window
+				payload({ id: 'live', energyKwh: null }) // still_charging
+			],
+			[existingRow({ id: 7, externalId: 'imported', kwhUsed: 42, odometerKm: 100 })],
+			[],
+			baseOpts
+		);
+
+		const counts = summarizePoll(plan, existing);
+		expect(counts.skipped).toBe(2);
+		expect(counts.tombstoneCandidates).toEqual(['blip']);
+		expect(counts.stillCharging).toBe(1);
+		expect(counts.invalidAfterImport).toEqual([]);
+	});
+
+	it('offers a newly dismissed zero-energy blip as a tombstone candidate, never as "already imported"', () => {
+		const plan = planImport([payload({ id: 'blip', energyKwh: 0 })], [], [], baseOpts);
+		const counts = summarizePoll(plan, []);
+
+		expect(counts.tombstoneCandidates).toEqual(['blip']);
+		expect(counts.skipped).toBe(0);
+	});
+
+	it('labels an invalid_after_import row with its date and time, and keeps it out of the tombstone count', () => {
+		const plan = planImport(
+			[payload({ sessionStatus: 'Invalid' })],
+			[existingRow({ id: 7, externalId: 'evnex-session-1' })],
+			[],
+			baseOpts
+		);
+		const counts = summarizePoll(plan, existing);
+
+		expect(counts.invalidAfterImport).toEqual(['2026-09-20 18:18']);
+		// Reported on the warning line, so not double-counted as newly dismissed.
+		expect(counts.tombstoneCandidates).toEqual([]);
+		expect(counts.skipped).toBe(0);
+	});
+
+	it('does not count a tombstoned (dismissed) session as already imported', () => {
+		const plan = planImport([payload()], [], ['evnex-session-1'], baseOpts);
+		const counts = summarizePoll(plan, []);
+
+		expect(counts.skipped).toBe(0);
+	});
+
+	it('reports a submitted-period session separately, not as an already-imported skip', () => {
+		const plan = planImport(
+			[payload({ energyKwh: 15.4 })],
+			[existingRow({ id: 7, kwhUsed: null, billingPeriodId: 99 })],
+			[],
+			{ ...baseOpts, submittedPeriodIds: [99] }
+		);
+		const counts = summarizePoll(plan, []);
+
+		expect(counts.periodSubmitted).toBe(1);
+		expect(counts.skipped).toBe(0);
+	});
+
+	it('falls back to the externalId when an invalid_after_import row is unknown', () => {
+		const plan = planImport(
+			[payload({ sessionStatus: 'Invalid' })],
+			[existingRow({ id: 7, externalId: 'evnex-session-1' })],
+			[],
+			baseOpts
+		);
+		const counts = summarizePoll(plan, []);
+
+		expect(counts.invalidAfterImport).toEqual(['evnex-session-1']);
+	});
+
+	it('excludes an invalid_after_import session from tombstoneCandidates even though planImport tombstones it', () => {
+		const plan = planImport(
+			[payload({ id: 'was-imported', sessionStatus: 'Invalid' })],
+			[existingRow({ id: 7, externalId: 'was-imported' })],
+			[],
+			baseOpts
+		);
+
+		expect(plan.tombstone).toEqual(['was-imported']);
+		expect(summarizePoll(plan, []).tombstoneCandidates).toEqual([]);
 	});
 });

@@ -28,6 +28,12 @@ export interface PollSummary {
 	tombstoned: number;
 	skipped: number;
 	stillCharging: number;
+	/**
+	 * Sessions the charger has that belong to an already-submitted billing
+	 * period, so they were not imported. Their own line, because the fix is
+	 * actionable (unsubmit the period) rather than "nothing to do".
+	 */
+	periodSubmitted: number;
 	invalidAfterImport: string[];
 	/**
 	 * charging_sessions.id of every row this poll inserted. Matched against the
@@ -87,6 +93,12 @@ export function composePollFeedback(
 		lines.push({
 			tone: 'note',
 			text: `${summary.tombstoned} invalid or zero-energy session${summary.tombstoned === 1 ? '' : 's'} dismissed.`
+		});
+	}
+	if (summary.periodSubmitted > 0) {
+		lines.push({
+			tone: 'warning',
+			text: `${summary.periodSubmitted} session${summary.periodSubmitted === 1 ? '' : 's'} not imported — the billing period is already submitted. Unsubmit it to import.`
 		});
 	}
 	if (summary.invalidAfterImport.length > 0) {

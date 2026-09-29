@@ -6,6 +6,7 @@ const baseSummary: PollSummary = {
 	tombstoned: 0,
 	skipped: 0,
 	stillCharging: 0,
+	periodSubmitted: 0,
 	invalidAfterImport: [],
 	insertedIds: [],
 	updated: 0
@@ -105,6 +106,15 @@ describe('composePollFeedback', () => {
 		expect(lines).toContainEqual({
 			tone: 'warning',
 			text: '1 previously imported session marked invalid or zero-energy by the charger — review: 2026-09-20 18:18.'
+		});
+	});
+
+	it('reports a submitted-period session on its own actionable line, not as a skip', () => {
+		const lines = composePollFeedback({ ...baseSummary, periodSubmitted: 2 }, fillResult());
+		expect(lines[0].text).toBe('Nothing new to import.');
+		expect(lines).toContainEqual({
+			tone: 'warning',
+			text: '2 sessions not imported — the billing period is already submitted. Unsubmit it to import.'
 		});
 	});
 
