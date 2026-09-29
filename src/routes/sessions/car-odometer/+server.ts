@@ -171,14 +171,14 @@ async function applyToDrafts(row: Ready) {
 
 	const now = new Date();
 	const window = requestWindow(drafts, now);
-	if (!window) return json({ ok: true, filled: 0, suggestions: [], skipped: 0 });
+	if (!window) return json({ ok: true, filled: 0, filledIds: [], suggestions: [], skipped: 0 });
 
 	const result = await readCompanion(row, window);
 	if (!result.ok) {
 		// no_data here means the companion answered but had nothing for these charges —
 		// every draft is simply left for the user, which isn't a failure to report loudly.
 		if (result.status === 'no_data') {
-			return json({ ok: true, filled: 0, suggestions: [], skipped: drafts.length });
+			return json({ ok: true, filled: 0, filledIds: [], suggestions: [], skipped: drafts.length });
 		}
 		return json({ ok: false, status: result.status, message: result.message });
 	}
@@ -201,9 +201,13 @@ async function applyToDrafts(row: Ready) {
 		}
 	});
 
+	// Which rows were actually written (by id, not just a count): the sessions
+	// page matches these against the poll's just-inserted ids to word a proven
+	// fill as an auto-completed charge rather than a draft + a fill.
 	return json({
 		ok: true,
 		filled: plan.fill.length,
+		filledIds: plan.fill.map((f) => f.id),
 		suggestions: plan.suggest,
 		skipped: plan.skip.length
 	});
