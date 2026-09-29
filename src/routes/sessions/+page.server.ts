@@ -447,14 +447,13 @@ export const actions: Actions = {
 		}
 
 		// Distinct counts for the summary: "skipped N already imported" counts only
-		// genuinely-already-imported sessions, while still-charging and newly
-		// dismissed sessions get their own lines rather than being folded in (and
-		// double-counted). summarizePoll owns that split — see its doc comment.
-		const pollCounts = summarizePoll(
-			planResult,
-			existingRows,
-			dismissedRows.map((r) => r.externalId)
-		);
+		// genuinely-already-imported sessions, while still-charging, newly dismissed
+		// and submitted-period sessions get their own lines rather than being folded
+		// in (and double-counted). summarizePoll owns that split — see its doc comment.
+		// `tombstoneCandidates` are only *counted* below, from the insert's affected
+		// rows, since a session already tombstoned by an earlier poll re-plans here
+		// every time and must not be reported as newly dismissed.
+		const pollCounts = summarizePoll(planResult, existingRows);
 
 		// planImport tombstones both Invalid sessions and zero-energy ones (plan-equivalent
 		// rules 1 and 2) — record which is which rather than always writing 'invalid', so
@@ -469,10 +468,17 @@ export const actions: Actions = {
 			}
 		}
 
+		// Only count tombstones whose insert actually added a row. `onConflictDoNothing`
+		// means a concurrent poll (or an earlier one) that already inserted the same
+		// externalId changes nothing here; reporting it as dismissed would be wrong.
+		const tombstoneCandidateIds = new Set(pollCounts.tombstoneCandidates);
+		let tombstoned = 0;
+
 		const insertedIds: number[] = [];
 		db.transaction((tx) => {
 			for (const externalId of planResult.tombstone) {
-				tx.insert(evnexDismissedSessions)
+				const result = tx
+					.insert(evnexDismissedSessions)
 					.values({
 						externalId,
 						dismissedAt: new Date().toISOString(),
@@ -480,6 +486,7 @@ export const actions: Actions = {
 					})
 					.onConflictDoNothing()
 					.run();
+				if (result.changes > 0 && tombstoneCandidateIds.has(externalId)) tombstoned++;
 			}
 
 			for (const draft of insertsToApply) {
@@ -546,9 +553,10 @@ export const actions: Actions = {
 		return {
 			pollSummary: {
 				updated: planResult.update.length,
-				tombstoned: pollCounts.tombstoned,
-				skipped: pollCounts.skipped + periodSubmittedInsertSkips,
+				tombstoned,
+				skipped: pollCounts.skipped,
 				stillCharging: pollCounts.stillCharging,
+				periodSubmitted: pollCounts.periodSubmitted + periodSubmittedInsertSkips,
 				invalidAfterImport: pollCounts.invalidAfterImport,
 				insertedIds
 			}

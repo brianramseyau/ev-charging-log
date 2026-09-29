@@ -194,16 +194,23 @@ export interface PlanImportResult {
  *
  * `skipped` is deliberately NOT `planResult.skipped.length`. It counts only
  * sessions that were genuinely already imported (`already_complete`,
- * `period_submitted`) or that can't be mapped yet (`unmappable`) — see the
- * per-reason reasoning on `summarizePoll`.
+ * `unmappable`) — see the per-reason reasoning on `summarizePoll`.
  */
 export interface PollSkipCounts {
 	/** The count behind "skipped N already imported" — in-window, not otherwise reported. */
 	skipped: number;
 	/** Sessions still on the charger (never imported) — reported on their own line. */
 	stillCharging: number;
-	/** Sessions *newly* dismissed this poll (invalid / zero energy) — reported on their own line. */
-	tombstoned: number;
+	/**
+	 * externalIds that should count as *newly* dismissed, but only if their
+	 * tombstone insert actually added a row. `summarizePoll` can't know that
+	 * (an already-tombstoned session re-plans on every poll), and `planImport`
+	 * tombstones both genuinely-new and already-dismissed sessions — so the
+	 * route counts the ids whose `onConflictDoNothing` insert changed a row.
+	 */
+	tombstoneCandidates: string[];
+	/** Sessions whose billing period is already submitted — reported on their own line. */
+	periodSubmitted: number;
 	/** Previously imported rows the charger has since invalidated — date/time labels. */
 	invalidAfterImport: string[];
 }
@@ -216,11 +223,11 @@ export interface PollSkipCounts {
  * already imported" wording) when it is already reported on its own line, or
  * when calling it "already imported" would simply be false:
  *
- * - `invalid` / `zero_energy` — tombstoned by `planImport` and counted in
- *   `tombstoned`, which gets its own "N invalid or zero-energy sessions
- *   dismissed" line. Counting them again here both double-counted a single
- *   session and mislabelled it as imported. These are also tombstoned by
- *   rules 1–2 *before* the window check, so an out-of-window blip would
+ * - `invalid` / `zero_energy` — tombstoned by `planImport` and reported via
+ *   `tombstoneCandidates`, which gets its own "N invalid or zero-energy
+ *   sessions dismissed" line. Counting them again here both double-counted a
+ *   single session and mislabelled it as imported. These are also tombstoned
+ *   by rules 1–2 *before* the window check, so an out-of-window blip would
  *   otherwise inflate the number even though it never appears in the log.
  * - `invalid_after_import` / `zero_energy_after_import` — reported (with the
  *   row's date/time) on the warning line; the row still exists, so "skipped"
@@ -232,25 +239,26 @@ export interface PollSkipCounts {
  *   imported". `still_charging` is aggregated separately; the pile of
  *   out-of-window skips only grows every poll since the endpoint takes no
  *   date range (§4.4), and is pure noise.
+ * - `period_submitted` — the session *is* imported, but the count is surfaced
+ *   separately (via `periodSubmitted`) with an actionable "unsubmit it"
+ *   message, rather than as an "already imported, nothing to do" skip.
  *
  * `unmappable` is the one judgement call: a session with no `startDate` may
  * have been imported on an earlier poll, so within the "already imported"
  * bucket it is the closest fit (the old count included it too).
  *
- * `tombstoned` counts only sessions dismissed for the *first* time. Rules 1–2
- * run before rule 4, so an already-tombstoned invalid/zero-energy session is
- * re-tombstoned (idempotently) on every poll; without this filter it would
- * report "1 dismissed" forever, long after the user has seen it. A row the
- * charger invalidated *after* it was imported is likewise excluded here — it's
- * on the more important `invalidAfterImport` warning line instead, so each
- * session appears in exactly one line.
+ * `tombstoneCandidates` excludes rows the charger invalidated *after* they
+ * were imported — those are on the more important `invalidAfterImport`
+ * warning line instead, so each session appears in exactly one line. Which of
+ * these actually get counted as freshly dismissed is decided by the route from
+ * the tombstone insert's affected-row count, not from a pre-transaction
+ * snapshot (a concurrent poll can win the insert, in which case this poll's
+ * `onConflictDoNothing` changes nothing and must not report a dismissal).
  */
 export function summarizePoll(
 	plan: PlanImportResult,
-	existing: { externalId: string | null; date: string; time: string }[],
-	dismissed: string[]
+	existing: { externalId: string | null; date: string; time: string }[]
 ): PollSkipCounts {
-	const dismissedSet = new Set(dismissed);
 	const count = (reason: SkipReason) => plan.skipped.filter((s) => s.reason === reason).length;
 
 	const afterImport = plan.skipped.filter(
@@ -269,15 +277,16 @@ export function summarizePoll(
 		'zero_energy_after_import',
 		'dismissed',
 		'outside_window',
-		'still_charging'
+		'still_charging',
+		'period_submitted'
 	];
 	const skipped = plan.skipped.filter((s) => !ownLineReasons.includes(s.reason)).length;
 
 	return {
 		skipped,
 		stillCharging: count('still_charging'),
-		tombstoned: plan.tombstone.filter((id) => !dismissedSet.has(id) && !afterImportIds.has(id))
-			.length,
+		tombstoneCandidates: plan.tombstone.filter((id) => !afterImportIds.has(id)),
+		periodSubmitted: count('period_submitted'),
 		invalidAfterImport
 	};
 }
