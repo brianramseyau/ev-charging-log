@@ -257,17 +257,23 @@
 			if (data.carOdometerEnabled) carFillRunning = true;
 			return async ({ result, update }) => {
 				polling = false;
-				await update();
-				const summary =
-					result.type === 'success'
-						? (result.data?.pollSummary as PollSummary | undefined)
-						: undefined;
-				if (summary && data.carOdometerEnabled) {
-					await runCarFill(summary);
-				} else {
-					// No car integration (or a failed poll): the summary speaks for itself.
+				try {
+					await update();
+					const summary =
+						result.type === 'success'
+							? (result.data?.pollSummary as PollSummary | undefined)
+							: undefined;
+					if (summary && data.carOdometerEnabled) {
+						await runCarFill(summary);
+					} else if (summary) {
+						// No car integration (or a failed poll): the summary speaks for itself.
+						pollLines = composePollFeedback(summary, null);
+					}
+				} finally {
+					// update()'s default flow awaits invalidation, which can reject (a
+					// failing load re-run, say) — that must not leave the fill-running
+					// flag up with "Reading odometers…" showing and the summary hidden.
 					carFillRunning = false;
-					if (summary) pollLines = composePollFeedback(summary, null);
 				}
 			};
 		}}
