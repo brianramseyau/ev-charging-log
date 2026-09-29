@@ -177,6 +177,111 @@ export interface ExistingSessionForImport {
 	endedAt: string | null;
 }
 
+export interface PlanImportResult {
+	insert: DraftFromEvnex[];
+	update: { id: number; kwhUsed: number }[];
+	backfill: { id: number; startedAt: string; endedAt: string | null }[];
+	tombstone: string[];
+	skipped: { externalId: string; reason: SkipReason }[];
+}
+
+/**
+ * The counts behind the /sessions poll summary (§7.2), computed from
+ * `planImport`'s output so the UI never has to re-derive them — a
+ * `planResult.skipped` entry is not the same thing as "a session the user
+ * could have imported", and conflating the two has produced counting bugs
+ * here before.
+ *
+ * `skipped` is deliberately NOT `planResult.skipped.length`. It counts only
+ * sessions that were genuinely already imported (`already_complete`,
+ * `period_submitted`) or that can't be mapped yet (`unmappable`) — see the
+ * per-reason reasoning on `summarizePoll`.
+ */
+export interface PollSkipCounts {
+	/** The count behind "skipped N already imported" — in-window, not otherwise reported. */
+	skipped: number;
+	/** Sessions still on the charger (never imported) — reported on their own line. */
+	stillCharging: number;
+	/** Sessions *newly* dismissed this poll (invalid / zero energy) — reported on their own line. */
+	tombstoned: number;
+	/** Previously imported rows the charger has since invalidated — date/time labels. */
+	invalidAfterImport: string[];
+}
+
+/**
+ * Splits `planImport`'s skips into the distinct counts the poll summary shows,
+ * rather than lumping every skip into one "already imported" number.
+ *
+ * A skipped session is excluded from `skipped` (and therefore from the "N
+ * already imported" wording) when it is already reported on its own line, or
+ * when calling it "already imported" would simply be false:
+ *
+ * - `invalid` / `zero_energy` — tombstoned by `planImport` and counted in
+ *   `tombstoned`, which gets its own "N invalid or zero-energy sessions
+ *   dismissed" line. Counting them again here both double-counted a single
+ *   session and mislabelled it as imported. These are also tombstoned by
+ *   rules 1–2 *before* the window check, so an out-of-window blip would
+ *   otherwise inflate the number even though it never appears in the log.
+ * - `invalid_after_import` / `zero_energy_after_import` — reported (with the
+ *   row's date/time) on the warning line; the row still exists, so "skipped"
+ *   is not the right word for it.
+ * - `dismissed` — previously tombstoned (invalid, zero energy, or deleted by
+ *   the user). "Already imported" would be a lie: it may never have been
+ *   imported at all, and the delete path tombstones the row on the way out.
+ * - `outside_window` / `still_charging` — never imported, so not "already
+ *   imported". `still_charging` is aggregated separately; the pile of
+ *   out-of-window skips only grows every poll since the endpoint takes no
+ *   date range (§4.4), and is pure noise.
+ *
+ * `unmappable` is the one judgement call: a session with no `startDate` may
+ * have been imported on an earlier poll, so within the "already imported"
+ * bucket it is the closest fit (the old count included it too).
+ *
+ * `tombstoned` counts only sessions dismissed for the *first* time. Rules 1–2
+ * run before rule 4, so an already-tombstoned invalid/zero-energy session is
+ * re-tombstoned (idempotently) on every poll; without this filter it would
+ * report "1 dismissed" forever, long after the user has seen it. A row the
+ * charger invalidated *after* it was imported is likewise excluded here — it's
+ * on the more important `invalidAfterImport` warning line instead, so each
+ * session appears in exactly one line.
+ */
+export function summarizePoll(
+	plan: PlanImportResult,
+	existing: { externalId: string | null; date: string; time: string }[],
+	dismissed: string[]
+): PollSkipCounts {
+	const dismissedSet = new Set(dismissed);
+	const count = (reason: SkipReason) => plan.skipped.filter((s) => s.reason === reason).length;
+
+	const afterImport = plan.skipped.filter(
+		(s) => s.reason === 'invalid_after_import' || s.reason === 'zero_energy_after_import'
+	);
+	const afterImportIds = new Set(afterImport.map((s) => s.externalId));
+	const invalidAfterImport = afterImport.map((s) => {
+		const row = existing.find((r) => r.externalId === s.externalId);
+		return row ? `${row.date} ${row.time}` : s.externalId;
+	});
+
+	const ownLineReasons: SkipReason[] = [
+		'invalid',
+		'zero_energy',
+		'invalid_after_import',
+		'zero_energy_after_import',
+		'dismissed',
+		'outside_window',
+		'still_charging'
+	];
+	const skipped = plan.skipped.filter((s) => !ownLineReasons.includes(s.reason)).length;
+
+	return {
+		skipped,
+		stillCharging: count('still_charging'),
+		tombstoned: plan.tombstone.filter((id) => !dismissedSet.has(id) && !afterImportIds.has(id))
+			.length,
+		invalidAfterImport
+	};
+}
+
 /**
  * Decides what a poll should do with each remote session: insert a new
  * draft, update an existing draft's kWh, tombstone it (never import again),
@@ -235,13 +340,7 @@ export function planImport(
 	existing: ExistingSessionForImport[],
 	dismissed: string[],
 	opts: { windowStart: string; timeZone: string; location: string; submittedPeriodIds: number[] }
-): {
-	insert: DraftFromEvnex[];
-	update: { id: number; kwhUsed: number }[];
-	backfill: { id: number; startedAt: string; endedAt: string | null }[];
-	tombstone: string[];
-	skipped: { externalId: string; reason: SkipReason }[];
-} {
+): PlanImportResult {
 	const insert: DraftFromEvnex[] = [];
 	const update: { id: number; kwhUsed: number }[] = [];
 	const backfill: { id: number; startedAt: string; endedAt: string | null }[] = [];

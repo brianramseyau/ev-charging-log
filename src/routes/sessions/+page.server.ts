@@ -19,7 +19,7 @@ import {
 	withEfficiency
 } from '$lib/server/sessions';
 import { calculateSessionCost, resolveRatePlan } from '$lib/server/rates';
-import { importWindow, planImport, type DraftFromEvnex, type SkipReason } from '$lib/server/evnex';
+import { importWindow, planImport, summarizePoll, type DraftFromEvnex } from '$lib/server/evnex';
 import { EvnexNetworkError, EvnexRefreshExpiredError } from '$lib/server/evnex-auth';
 import {
 	EvnexApiError,
@@ -446,29 +446,15 @@ export const actions: Actions = {
 			insertsToApply.push({ ...draft, billingPeriodId });
 		}
 
-		// still_charging is its own summary line ("N sessions are still charging —
-		// not eligible to import yet"), so don't also fold it into "skipped N
-		// already imported" — that label would be wrong for a session that was
-		// never imported at all.
-		const countSkips = (reason: SkipReason) =>
-			planResult.skipped.filter((s) => s.reason === reason).length;
-
-		// The Evnex endpoint takes no date range (plan §4.4), so every poll re-sees
-		// the charger's full history, and the pile of sessions older than the
-		// lookback window only ever grows. Those `outside_window` skips were never
-		// imported and never will be — keep them out of the "skipped N already
-		// imported" count shown to the user.
-		const inWindowSkips =
-			planResult.skipped.length -
-			planResult.skipped.filter((s) => s.reason === 'outside_window').length -
-			countSkips('still_charging');
-
-		const invalidAfterImportSessions = planResult.skipped
-			.filter((s) => s.reason === 'invalid_after_import' || s.reason === 'zero_energy_after_import')
-			.map((s) => {
-				const existing = existingRows.find((r) => r.externalId === s.externalId);
-				return existing ? `${existing.date} ${existing.time}` : s.externalId;
-			});
+		// Distinct counts for the summary: "skipped N already imported" counts only
+		// genuinely-already-imported sessions, while still-charging and newly
+		// dismissed sessions get their own lines rather than being folded in (and
+		// double-counted). summarizePoll owns that split — see its doc comment.
+		const pollCounts = summarizePoll(
+			planResult,
+			existingRows,
+			dismissedRows.map((r) => r.externalId)
+		);
 
 		// planImport tombstones both Invalid sessions and zero-energy ones (plan-equivalent
 		// rules 1 and 2) — record which is which rather than always writing 'invalid', so
@@ -560,10 +546,10 @@ export const actions: Actions = {
 		return {
 			pollSummary: {
 				updated: planResult.update.length,
-				tombstoned: planResult.tombstone.length,
-				skipped: inWindowSkips + periodSubmittedInsertSkips,
-				stillCharging: countSkips('still_charging'),
-				invalidAfterImport: invalidAfterImportSessions,
+				tombstoned: pollCounts.tombstoned,
+				skipped: pollCounts.skipped + periodSubmittedInsertSkips,
+				stillCharging: pollCounts.stillCharging,
+				invalidAfterImport: pollCounts.invalidAfterImport,
 				insertedIds
 			}
 		};
