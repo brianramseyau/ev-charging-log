@@ -42,6 +42,41 @@ const THIN_BORDER = {
 	right: BORDER_THIN
 };
 
+/**
+ * Collapses adjacent sessions that share an odometer reading into a single
+ * entry. A car briefly unplugged and moved mid-charge (or moved and returned)
+ * produces two or more sessions with an identical odometer; the later ones
+ * show 0 km travelled (0.00 km/kWh) and shouldn't appear as separate claim
+ * lines. The merged row keeps the first session's date/time/location and sums
+ * kWh and cost, so the period totals are unaffected.
+ *
+ * Sessions must already be in chronological order (the export route orders by
+ * date/time/id). Only immediately-adjacent equal readings merge, so an older
+ * session that coincidentally repeats a reading isn't folded into a later one;
+ * a reading of null never matches (not-yet-known, not zero distance).
+ */
+export function mergeAdjacentSessions(sessions: ReportSession[]): ReportSession[] {
+	const merged: ReportSession[] = [];
+	for (const session of sessions) {
+		const prev = merged[merged.length - 1];
+		const sameOdometer =
+			prev != null &&
+			prev.odometerKm != null &&
+			session.odometerKm != null &&
+			prev.odometerKm === session.odometerKm;
+
+		if (!sameOdometer) {
+			merged.push({ ...session });
+			continue;
+		}
+
+		prev.kwhUsed += session.kwhUsed;
+		prev.cost =
+			prev.cost == null && session.cost == null ? null : (prev.cost ?? 0) + (session.cost ?? 0);
+	}
+	return merged;
+}
+
 function sumKwh(sessions: ReportSession[]): number {
 	return sessions.reduce((total, s) => total + s.kwhUsed, 0);
 }

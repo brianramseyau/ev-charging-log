@@ -1,6 +1,6 @@
 import { db } from '$lib/server/db';
 import { billingPeriods, chargingSessions, settings } from '$lib/server/db/schema';
-import { generateReport, type ReportSession } from '$lib/server/report';
+import { generateReport, mergeAdjacentSessions, type ReportSession } from '$lib/server/report';
 import { asc, eq } from 'drizzle-orm';
 import { error } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
@@ -35,8 +35,15 @@ export const GET: RequestHandler = async ({ params }) => {
 	// already blocks submitting a period while any remain, but exclude them here
 	// too in case the export link is hit directly on an unsubmitted period.
 	const completedSessions = sessions.filter((s) => s.kwhUsed != null && s.odometerKm != null);
-	const homeSessions = completedSessions.filter((s) => s.kind === 'home').map(toReportSession);
-	const publicSessions = completedSessions.filter((s) => s.kind === 'public').map(toReportSession);
+	// A charge interrupted by a quick unplug/move/replug yields adjacent sessions
+	// reading the same odometer; the later ones would otherwise be 0 km lines in
+	// the report. Sessions are already chronologically ordered above.
+	const homeSessions = mergeAdjacentSessions(
+		completedSessions.filter((s) => s.kind === 'home').map(toReportSession)
+	);
+	const publicSessions = mergeAdjacentSessions(
+		completedSessions.filter((s) => s.kind === 'public').map(toReportSession)
+	);
 
 	const buffer = await generateReport(
 		{ label: period.label, startDate: period.startDate, endDate: period.endDate },

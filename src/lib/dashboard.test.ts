@@ -77,6 +77,24 @@ describe('computeEfficiencySeries', () => {
 		expect(computeEfficiencySeries(sessions)).toEqual([]);
 	});
 
+	it('skips a session whose odometer did not advance (a 0 km sub-charge, not 0.00 km/kWh)', () => {
+		const sessions = [
+			session({ id: 1, date: '2026-01-08', time: '09:00', odometerKm: 500, kwhUsed: 10 }),
+			session({ id: 2, date: '2026-01-08', time: '09:05', odometerKm: 500, kwhUsed: 8 })
+		];
+		expect(computeEfficiencySeries(sessions)).toEqual([]);
+	});
+
+	it('still diffs the next home session against a zero-distance predecessor', () => {
+		const sessions = [
+			session({ id: 1, date: '2026-01-08', time: '09:00', odometerKm: 500, kwhUsed: 10 }),
+			session({ id: 2, date: '2026-01-08', time: '09:05', odometerKm: 500, kwhUsed: 8 }),
+			session({ id: 3, date: '2026-01-15', time: '09:00', odometerKm: 800, kwhUsed: 30 })
+		];
+		const points = computeEfficiencySeries(sessions);
+		expect(points).toEqual([{ sessionId: 3, date: '2026-01-15', kmPerKwh: 10 }]);
+	});
+
 	it('skips a session with no kWh recorded', () => {
 		const sessions = [
 			session({ id: 1, date: '2026-01-01', odometerKm: 100, kwhUsed: 10 }),

@@ -44,9 +44,11 @@ function byDateTime(a: DashboardSession, b: DashboardSession): number {
  * immediately preceding session, of either kind, in chronological order) ÷ kWh
  * used at this session (PLAN.md §10). The very first session overall has no
  * predecessor to diff against and is skipped, and any session whose distance
- * or kWh can't produce a sane ratio (odometer went backwards, no kWh recorded)
- * is skipped rather than plotted as a misleading spike. Same rule for a null
- * odometer: if this session's or the immediately-preceding session's
+ * or kWh can't produce a sane ratio (odometer went backwards or didn't advance,
+ * no kWh recorded) is skipped rather than plotted as a misleading spike — an
+ * unchanged odometer (e.g. a charge split by a quick unplug/move/replug) would
+ * otherwise plot as a 0.00 km/kWh point and drag the average down. Same rule
+ * for a null odometer: if this session's or the immediately-preceding session's
  * odometer reading isn't known yet (e.g. an unresolved Evnex draft), the
  * session is skipped rather than carrying forward an earlier reading.
  */
@@ -62,7 +64,7 @@ export function computeEfficiencySeries(sessions: DashboardSession[]): Efficienc
 		const previous = sorted[i - 1];
 		if (current.odometerKm == null || previous.odometerKm == null) continue;
 		const deltaKm = current.odometerKm - previous.odometerKm;
-		if (!Number.isFinite(deltaKm) || deltaKm < 0) continue;
+		if (!Number.isFinite(deltaKm) || deltaKm <= 0) continue;
 
 		const kmPerKwh = deltaKm / current.kwhUsed;
 		if (!Number.isFinite(kmPerKwh)) continue;
