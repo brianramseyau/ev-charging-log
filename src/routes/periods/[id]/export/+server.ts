@@ -1,16 +1,17 @@
 import { db } from '$lib/server/db';
 import { billingPeriods, chargingSessions, settings } from '$lib/server/db/schema';
-import { generateReport, mergeAdjacentSessions, type ReportSession } from '$lib/server/report';
+import { generateReport, groupReportSessions } from '$lib/server/report';
 import { asc, eq } from 'drizzle-orm';
 import { error } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 
-function toReportSession(s: typeof chargingSessions.$inferSelect): ReportSession {
+function toReportSession(s: typeof chargingSessions.$inferSelect) {
 	return {
 		time: s.time,
 		date: s.date,
+		kind: s.kind,
 		odometerKm: s.odometerKm,
-		kwhUsed: s.kwhUsed ?? 0,
+		kwhUsed: s.kwhUsed,
 		location: s.location,
 		cost: s.cost
 	};
@@ -31,18 +32,14 @@ export const GET: RequestHandler = async ({ params }) => {
 
 	const [settingsRow] = await db.select().from(settings).limit(1);
 
-	// Drafts (kwhUsed or odometerKm not yet recorded) have no cost yet; ?/submit
-	// already blocks submitting a period while any remain, but exclude them here
-	// too in case the export link is hit directly on an unsubmitted period.
-	const completedSessions = sessions.filter((s) => s.kwhUsed != null && s.odometerKm != null);
 	// A charge interrupted by a quick unplug/move/replug yields adjacent sessions
 	// reading the same odometer; the later ones would otherwise be 0 km lines in
-	// the report. Sessions are already chronologically ordered above.
-	const homeSessions = mergeAdjacentSessions(
-		completedSessions.filter((s) => s.kind === 'home').map(toReportSession)
-	);
-	const publicSessions = mergeAdjacentSessions(
-		completedSessions.filter((s) => s.kind === 'public').map(toReportSession)
+	// the report. Merge runs of genuinely back-to-back sessions per kind, with a
+	// kind change or an incomplete draft acting as a boundary (see
+	// groupReportSessions) so a public charge or draft between two home sessions
+	// doesn't let them combine. Drafts (no kWh yet) are excluded, as before.
+	const { home: homeSessions, public: publicSessions } = groupReportSessions(
+		sessions.map(toReportSession)
 	);
 
 	const buffer = await generateReport(

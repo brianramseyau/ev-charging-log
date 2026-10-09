@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import ExcelJS from 'exceljs';
-import { generateReport, mergeAdjacentSessions, type ReportSession } from './report';
+import {
+	generateReport,
+	groupReportSessions,
+	mergeAdjacentSessions,
+	type ReportSession,
+	type ReportSessionInput
+} from './report';
 
 const homeSessions: ReportSession[] = [
 	{
@@ -209,5 +215,70 @@ describe('mergeAdjacentSessions', () => {
 		];
 		mergeAdjacentSessions(rows);
 		expect(rows[0].kwhUsed).toBe(4);
+	});
+});
+
+describe('groupReportSessions', () => {
+	const input = (overrides: Partial<ReportSessionInput>): ReportSessionInput => ({
+		time: '08:00',
+		date: '2026-01-01',
+		kind: 'home',
+		odometerKm: 1000,
+		kwhUsed: 10,
+		location: 'Home',
+		cost: null,
+		...overrides
+	});
+
+	it('splits by kind and merges back-to-back same-odometer sessions within a run', () => {
+		const { home, public: publicSessions } = groupReportSessions([
+			input({ kind: 'home', time: '09:00', odometerKm: 1000, kwhUsed: 4 }),
+			input({ kind: 'home', time: '09:05', odometerKm: 1000, kwhUsed: 6 }),
+			input({ kind: 'public', time: '12:00', odometerKm: 1050, kwhUsed: 20 }),
+			input({ kind: 'public', time: '12:10', odometerKm: 1050, kwhUsed: 5 })
+		]);
+		expect(home).toHaveLength(1);
+		expect(home[0].kwhUsed).toBe(10);
+		expect(publicSessions).toHaveLength(1);
+		expect(publicSessions[0].kwhUsed).toBe(25);
+	});
+
+	it('does not merge same-odometer home sessions separated by a public session', () => {
+		const { home } = groupReportSessions([
+			input({ kind: 'home', time: '09:00', odometerKm: 1000, kwhUsed: 4 }),
+			input({ kind: 'public', time: '10:00', odometerKm: 1000, kwhUsed: 5 }),
+			input({ kind: 'home', time: '11:00', odometerKm: 1000, kwhUsed: 6 })
+		]);
+		expect(home).toHaveLength(2);
+		expect(home.map((s) => s.kwhUsed)).toEqual([4, 6]);
+	});
+
+	it('does not merge same-odometer home sessions separated by an incomplete draft', () => {
+		const { home } = groupReportSessions([
+			input({ kind: 'home', time: '09:00', odometerKm: 1000, kwhUsed: 4 }),
+			input({ kind: 'home', time: '09:05', odometerKm: 1000, kwhUsed: null }), // draft
+			input({ kind: 'home', time: '09:10', odometerKm: 1000, kwhUsed: 6 })
+		]);
+		expect(home).toHaveLength(2);
+		expect(home.map((s) => s.kwhUsed)).toEqual([4, 6]);
+	});
+
+	it('excludes drafts and sessions with an unknown odometer from the report', () => {
+		const { home } = groupReportSessions([
+			input({ time: '09:00', odometerKm: 1000, kwhUsed: 4 }),
+			input({ time: '09:05', odometerKm: null, kwhUsed: 6 }),
+			input({ time: '09:10', odometerKm: 1050, kwhUsed: null })
+		]);
+		expect(home).toHaveLength(1);
+		expect(home[0].kwhUsed).toBe(4);
+	});
+
+	it('preserves chronological order within each section', () => {
+		const { home } = groupReportSessions([
+			input({ time: '09:00', odometerKm: 1000, kwhUsed: 4 }),
+			input({ time: '09:30', odometerKm: 1100, kwhUsed: 6 }),
+			input({ time: '09:20', odometerKm: 1050, kwhUsed: 5 })
+		]);
+		expect(home.map((s) => s.time)).toEqual(['09:00', '09:30', '09:20']);
 	});
 });
