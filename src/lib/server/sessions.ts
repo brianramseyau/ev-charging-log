@@ -89,11 +89,14 @@ export function findBillingPeriodId(date: string, periods: BillingPeriodRange[])
  * Attaches a km/kWh efficiency figure to each session: the distance travelled
  * since the previous session (by date/time order, any kind) divided by this
  * session's kWh used. Null for the first session, a draft session (no kWh
- * recorded yet), when kWh used is 0, or when either this session's or the
+ * recorded yet), when kWh used is 0, when either this session's or the
  * immediately-preceding session's odometer reading is null (not yet known —
- * e.g. an unresolved Evnex draft). A null odometer is never carried forward
- * from an earlier reading: doing so would attribute two intervals' distance
- * to one session's kWh and silently understate efficiency.
+ * e.g. an unresolved Evnex draft), or when the odometer didn't advance since
+ * the previous reading (a 0 km session — e.g. a charge split by a quick
+ * unplug/move/replug — would otherwise show as an invalid 0.00 km/kWh). A null
+ * odometer is never carried forward from an earlier reading: doing so would
+ * attribute two intervals' distance to one session's kWh and silently
+ * understate efficiency.
  *
  * Returns sessions in ascending chronological order.
  */
@@ -103,13 +106,13 @@ export function withEfficiency<T extends SessionRow>(
 	const asc = sortByDateTimeAsc(rows);
 	return asc.map((curr, i) => {
 		const prev = asc[i - 1];
+		const deltaKm =
+			prev && curr.odometerKm != null && prev.odometerKm != null
+				? curr.odometerKm - prev.odometerKm
+				: null;
 		const efficiencyKmPerKwh =
-			prev &&
-			curr.kwhUsed != null &&
-			curr.kwhUsed > 0 &&
-			curr.odometerKm != null &&
-			prev.odometerKm != null
-				? (curr.odometerKm - prev.odometerKm) / curr.kwhUsed
+			prev && curr.kwhUsed != null && curr.kwhUsed > 0 && deltaKm != null && deltaKm > 0
+				? deltaKm / curr.kwhUsed
 				: null;
 		return { ...curr, efficiencyKmPerKwh };
 	});

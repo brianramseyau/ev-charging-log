@@ -18,6 +18,22 @@ export interface ReportSession {
 	cost: number | null;
 }
 
+/**
+ * A chronologically-ordered session as read from the database, before it's
+ * filtered down to a claim line. `kwhUsed`/`odometerKm` are nullable because a
+ * draft (kWh not yet recorded, or odometer not yet known) can sit in the
+ * middle of a period and must break an otherwise-mergeable run.
+ */
+export interface ReportSessionInput {
+	time: string;
+	date: string;
+	kind: 'home' | 'public';
+	odometerKm: number | null;
+	kwhUsed: number | null;
+	location: string;
+	cost: number | null;
+}
+
 export interface ReportPeriod {
 	label: string;
 	startDate: string;
@@ -41,6 +57,91 @@ const THIN_BORDER = {
 	bottom: BORDER_THIN,
 	right: BORDER_THIN
 };
+
+/**
+ * Collapses adjacent sessions that share an odometer reading into a single
+ * entry. A car briefly unplugged and moved mid-charge (or moved and returned)
+ * produces two or more sessions with an identical odometer; the later ones
+ * show 0 km travelled (0.00 km/kWh) and shouldn't appear as separate claim
+ * lines. The merged row keeps the first session's date/time/location and sums
+ * kWh and cost, so the period totals are unaffected.
+ *
+ * Sessions must already be in chronological order (the export route orders by
+ * date/time/id). Only immediately-adjacent equal readings merge, so an older
+ * session that coincidentally repeats a reading isn't folded into a later one;
+ * a reading of null never matches (not-yet-known, not zero distance).
+ */
+export function mergeAdjacentSessions(sessions: ReportSession[]): ReportSession[] {
+	const merged: ReportSession[] = [];
+	for (const session of sessions) {
+		const prev = merged[merged.length - 1];
+		const sameOdometer =
+			prev != null &&
+			prev.odometerKm != null &&
+			session.odometerKm != null &&
+			prev.odometerKm === session.odometerKm;
+
+		if (!sameOdometer) {
+			merged.push({ ...session });
+			continue;
+		}
+
+		prev.kwhUsed += session.kwhUsed;
+		prev.cost =
+			prev.cost == null && session.cost == null ? null : (prev.cost ?? 0) + (session.cost ?? 0);
+	}
+	return merged;
+}
+
+/**
+ * Splits an entire period's sessions (chronological order, the export route's
+ * date/time/id order) into merged home and public claim-line lists.
+ *
+ * Adjacency is judged on the original sequence, not after filtering: a session
+ * of the other kind, or an incomplete draft, is a boundary. So two home
+ * sessions with a public charge (or a draft) between them do not merge, even
+ * though they'd be neighbours once the public/draft rows are removed — only a
+ * genuinely back-to-back pair (the unplug/move/replug case) collapses. Drafts
+ * are excluded from the report, as before.
+ */
+export function groupReportSessions(sessions: ReportSessionInput[]): {
+	home: ReportSession[];
+	public: ReportSession[];
+} {
+	const home: ReportSession[] = [];
+	const publicSessions: ReportSession[] = [];
+	let run: ReportSession[] = [];
+	let runKind: 'home' | 'public' | null = null;
+
+	const flush = () => {
+		if (run.length === 0) return;
+		(runKind === 'home' ? home : publicSessions).push(...mergeAdjacentSessions(run));
+		run = [];
+	};
+
+	for (const session of sessions) {
+		if (session.kwhUsed == null || session.odometerKm == null) {
+			flush();
+			runKind = null;
+			continue;
+		}
+		if (runKind !== session.kind) {
+			flush();
+			runKind = session.kind;
+		}
+		run.push({
+			time: session.time,
+			date: session.date,
+			odometerKm: session.odometerKm,
+			kwhUsed: session.kwhUsed,
+			location: session.location,
+			cost: session.cost
+		});
+	}
+	flush();
+
+	return { home, public: publicSessions };
+}
 
 function sumKwh(sessions: ReportSession[]): number {
 	return sessions.reduce((total, s) => total + s.kwhUsed, 0);

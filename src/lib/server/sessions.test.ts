@@ -184,6 +184,25 @@ describe('withEfficiency', () => {
 		expect(result[2].efficiencyKmPerKwh).toBeNull();
 	});
 
+	it('is null when the odometer did not advance (a 0 km sub-charge, not 0.00 km/kWh)', () => {
+		const rows = [
+			s(1, '2026-08-01', '09:00', 1000, 10),
+			s(2, '2026-08-01', '09:05', 1000, 8) // unplugged/moved/replugged mid-charge
+		];
+		const result = withEfficiency(rows);
+		expect(result[1].efficiencyKmPerKwh).toBeNull();
+	});
+
+	it('still diffs the next session against a zero-distance predecessor', () => {
+		const rows = [
+			s(1, '2026-08-01', '09:00', 1000, 10),
+			s(2, '2026-08-01', '09:05', 1000, 8), // 0 distance
+			s(3, '2026-08-05', '09:00', 1150, 15)
+		];
+		const result = withEfficiency(rows);
+		expect(result[2].efficiencyKmPerKwh).toBeCloseTo(10, 5); // (1150-1000)/15
+	});
+
 	it('computes correctly for a normal pair with two non-null odometers', () => {
 		const rows = [s(1, '2026-08-01', '09:00', 1000, 10), s(2, '2026-08-05', '09:00', 1150, 15)];
 		const result = withEfficiency(rows);
