@@ -53,10 +53,21 @@ export const GET: RequestHandler = async ({ params }) => {
 
 	const filename = `${period.label.replace(/[^a-z0-9]+/gi, '-')}-home-charging-report.xlsx`;
 
-	return new Response(new Uint8Array(buffer), {
+	// Set Content-Length explicitly: SvelteKit streams a Response body, so without
+	// it the reply goes out chunked with no length. Reverse proxies and download
+	// handlers treat a length-less `Content-Disposition: attachment` far worse than
+	// a normal page — some buffer it to disk or refuse it outright — and it's a
+	// pointless ambiguity when the whole workbook is already in memory.
+	const body = new Uint8Array(buffer);
+
+	return new Response(body, {
 		headers: {
 			'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-			'Content-Disposition': `attachment; filename="${filename}"`
+			'Content-Length': String(body.byteLength),
+			'Content-Disposition': `attachment; filename="${filename}"`,
+			// A report is generated per request; never let a proxy or the service
+			// worker serve a stale one.
+			'Cache-Control': 'no-store'
 		}
 	});
 };

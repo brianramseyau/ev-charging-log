@@ -14,11 +14,12 @@
 	const settingsAlert = $derived(data.carOdometerAlert);
 
 	if (browser && !__ELECTRON_BUILD__) {
-		// The virtual module only exists when SvelteKitPWA is registered (skipped for
-		// Electron builds, see vite.config.ts) — @vite-ignore keeps the bundler from
-		// trying to statically resolve it in that case.
-		const pwaRegisterModule = 'virtual:pwa-register/svelte';
-		import(/* @vite-ignore */ pwaRegisterModule).then(({ useRegisterSW }) => useRegisterSW());
+		// A plain specifier so Vite resolves and bundles the virtual module. Electron
+		// builds don't register SvelteKitPWA (see vite.config.ts), so they alias this
+		// exact id to a no-op stub instead of leaving an unresolvable import in the
+		// bundle — which is what `@vite-ignore` used to do here, silently breaking
+		// service-worker registration in every browser build.
+		import('virtual:pwa-register/svelte').then(({ useRegisterSW }) => useRegisterSW());
 	}
 
 	const navItems = [
