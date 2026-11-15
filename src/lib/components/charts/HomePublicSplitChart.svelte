@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { formatCompact, linearScale, niceTicks } from './chartUtils';
+	import { formatCompact, layoutAxisLabels, linearScale, niceTicks } from './chartUtils';
 	import type { PeriodSplit } from '$lib/dashboard';
 
 	let { periods }: { periods: PeriodSplit[] } = $props();
@@ -22,6 +22,13 @@
 
 	const slotWidth = $derived(periods.length ? plotWidth / periods.length : plotWidth);
 	const barWidth = $derived(Math.min(maxBarThickness, slotWidth * 0.6));
+	const labelLayout = $derived(
+		layoutAxisLabels(
+			periods.map((p) => p.label),
+			slotWidth,
+			plotWidth
+		)
+	);
 
 	function barX(i: number) {
 		return i * slotWidth + (slotWidth - barWidth) / 2;
@@ -98,12 +105,11 @@
 							/>
 						{/if}
 					</g>
-					<text
-						x={i * slotWidth + slotWidth / 2}
-						y={plotHeight + 16}
-						class="tick-label"
-						text-anchor="middle">{p.label}</text
-					>
+					{#if labelLayout[i].visible}
+						<text x={labelLayout[i].x} y={plotHeight + 16} class="tick-label" text-anchor="middle"
+							>{labelLayout[i].text}</text
+						>
+					{/if}
 				{/each}
 			</g>
 		</svg>
