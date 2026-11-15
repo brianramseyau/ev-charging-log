@@ -58,17 +58,28 @@ export function estimateTextWidth(text: string, fontSize: number): number {
 }
 
 export interface AxisLabelLayout {
+	/** Text to render — the original label, or an ellipsised version if it's wider than the plot. */
+	text: string;
 	/** Centre to render the label at (nudged inwards when it would spill past the plot). */
 	x: number;
 	/** False when showing this label would overlap the next one that's shown. */
 	visible: boolean;
 }
 
+/** Trims `label` to fit `maxWidth`, marking the cut with an ellipsis. */
+export function truncateLabelToWidth(label: string, maxWidth: number, fontSize: number): string {
+	if (estimateTextWidth(label, fontSize) <= maxWidth) return label;
+	const charWidth = estimateTextWidth('W', fontSize);
+	const maxChars = Math.max(0, Math.floor(maxWidth / charWidth) - 1);
+	return maxChars > 0 ? label.slice(0, maxChars).trimEnd() + '…' : '…';
+}
+
 /**
  * Positions for an x-axis category label per entry, hiding any that would
- * overlap. Layout walks from the end so the most recent period always keeps
- * its label, and uses the same clamped x the label is rendered at so a wide
- * final label can't be pushed into its neighbour.
+ * overlap. Labels wider than the plot are truncated first so they can always
+ * be contained. Layout walks from the end so the most recent period always
+ * keeps its label, and uses the same clamped x the label is rendered at so a
+ * wide final label can't be pushed into its neighbour.
  */
 export function layoutAxisLabels(
 	labels: string[],
@@ -77,21 +88,22 @@ export function layoutAxisLabels(
 	fontSize = 10,
 	gap = 6
 ): AxisLabelLayout[] {
-	const centres = labels.map((label, i) => {
+	const texts = labels.map((label) => truncateLabelToWidth(label, plotWidth, fontSize));
+	const centres = texts.map((label, i) => {
 		const centre = i * slotWidth + slotWidth / 2;
 		const half = estimateTextWidth(label, fontSize) / 2;
 		return Math.min(Math.max(centre, half), Math.max(plotWidth - half, plotWidth / 2));
 	});
-	const visible = labels.map(() => false);
+	const visible = texts.map(() => false);
 	let previousLeft = Infinity;
-	for (let i = labels.length - 1; i >= 0; i--) {
-		const half = estimateTextWidth(labels[i], fontSize) / 2;
+	for (let i = texts.length - 1; i >= 0; i--) {
+		const half = estimateTextWidth(texts[i], fontSize) / 2;
 		if (centres[i] + half <= previousLeft - gap) {
 			visible[i] = true;
 			previousLeft = centres[i] - half;
 		}
 	}
-	return centres.map((x, i) => ({ x, visible: visible[i] }));
+	return centres.map((x, i) => ({ text: texts[i], x, visible: visible[i] }));
 }
 
 export function formatDateShort(iso: string): string {

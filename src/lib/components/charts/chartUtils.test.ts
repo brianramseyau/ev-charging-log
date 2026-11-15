@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { estimateTextWidth, layoutAxisLabels } from './chartUtils';
+import { estimateTextWidth, layoutAxisLabels, truncateLabelToWidth } from './chartUtils';
 
 const MONTHS = [
 	'May 2026',
@@ -48,7 +48,34 @@ describe('layoutAxisLabels', () => {
 		}
 	});
 
+	it('truncates a label wider than the plot so it still fits', () => {
+		const plotWidth = 295;
+		const [layout] = layoutAxisLabels(['W'.repeat(60)], 295, plotWidth);
+		const half = estimateTextWidth(layout.text, 10) / 2;
+		expect(layout.text.endsWith('…')).toBe(true);
+		expect(estimateTextWidth(layout.text, 10)).toBeLessThanOrEqual(plotWidth);
+		expect(layout.x - half).toBeGreaterThanOrEqual(0);
+		expect(layout.x + half).toBeLessThanOrEqual(plotWidth);
+	});
+
+	it('leaves labels that already fit untouched', () => {
+		const [layout] = layoutAxisLabels(['June 2026'], 295, 295);
+		expect(layout.text).toBe('June 2026');
+	});
+
 	it('returns an empty array for no labels', () => {
 		expect(layoutAxisLabels([], 100, 300)).toEqual([]);
+	});
+});
+
+describe('truncateLabelToWidth', () => {
+	it('does not change text that fits', () => {
+		expect(truncateLabelToWidth('June 2026', 100, 10)).toBe('June 2026');
+	});
+
+	it('ellipsises text that is too wide', () => {
+		const text = truncateLabelToWidth('A very long custom period label', 60, 10);
+		expect(text.endsWith('…')).toBe(true);
+		expect(estimateTextWidth(text, 10)).toBeLessThanOrEqual(60);
 	});
 });

@@ -74,7 +74,7 @@
 					/>
 					{#if labelLayout[i].visible}
 						<text x={labelLayout[i].x} y={plotHeight + 16} class="tick-label" text-anchor="middle"
-							>{p.label}</text
+							>{labelLayout[i].text}</text
 						>
 					{/if}
 				{/each}
